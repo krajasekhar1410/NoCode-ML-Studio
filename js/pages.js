@@ -227,11 +227,18 @@ const Pages = {
         </div></div><div style="overflow-y:auto"><div id="anova-results"><div class="empty-state"><i class="fas fa-layer-group"></i><h3>ANOVA</h3><p>Set up the analysis</p></div></div></div></div>`,
 
     correlation: () => `
-        <div class="grid-sidebar"><div class="card" style="overflow-y:auto"><div class="card-header"><h3>Select Variables</h3></div><div class="card-body">
+        <div class="grid-sidebar"><div class="card" style="overflow-y:auto"><div class="card-header"><h3><i class="fas fa-crosshairs"></i> Target vs Features</h3></div><div class="card-body">
+            <div class="form-group"><label style="font-weight:700;color:var(--accent)">Target Variable (Y)</label>
+                <select class="form-control var-dropdown" id="corr-target" style="border-color:var(--accent)"></select>
+                <p style="font-size:10px;color:var(--text-muted);margin-top:4px">Correlations computed against this column</p>
+            </div>
             <div class="form-group"><label>Method</label><select class="form-control" id="corr-method"><option value="pearson">Pearson</option><option value="spearman">Spearman</option></select></div>
-            <div id="corr-var-list"></div>
-            <button class="btn btn-primary btn-block" id="btn-run-correlation" style="margin-top:14px"><i class="fas fa-play"></i> Compute</button>
-        </div></div><div style="overflow-y:auto"><div id="corr-results"><div class="empty-state"><i class="fas fa-bezier-curve"></i><h3>Correlation Analysis</h3><p>Select variables and compute</p></div></div></div></div>`,
+            <div class="form-group"><label>Feature Variables</label>
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:6px">All numeric features selected by default</div>
+                <div id="corr-var-list" style="max-height:240px;overflow-y:auto"></div>
+            </div>
+            <button class="btn btn-primary btn-block" id="btn-run-correlation" style="margin-top:14px"><i class="fas fa-play"></i> Run Correlation</button>
+        </div></div><div style="overflow-y:auto"><div id="corr-results"><div class="empty-state"><i class="fas fa-bezier-curve"></i><h3>Target Correlation Analysis</h3><p>Select a target variable and click Run Correlation</p></div></div></div></div>`,
 
     controlCharts: () => `
         <div class="grid-sidebar"><div class="card" style="overflow-y:auto"><div class="card-header"><h3>Control Chart Setup</h3></div><div class="card-body">

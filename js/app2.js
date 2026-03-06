@@ -54,7 +54,111 @@ function initRegression() {
     U.on('btn-run-regression', 'click', () => { if (!dm.hasData()) return; const resp = U.el('reg-response').value, pred = U.el('reg-predictor').value; if (!resp || !pred) { U.toast('Select variables', 'warning'); return } const y = dm.getNumericValues(resp), x = dm.getNumericValues(pred), n = Math.min(x.length, y.length); try { const t = U.el('reg-type').value; let r; if (t === 'polynomial') r = StatisticsEngine.polynomialRegression(x.slice(0, n), y.slice(0, n), +U.el('reg-degree').value); else r = StatisticsEngine.linearRegression(x.slice(0, n), y.slice(0, n)); let h = `<div class="result-section"><h4><i class="fas fa-project-diagram"></i> ${r.equation}</h4><div class="result-summary"><strong>R² = ${r.rSquared.toFixed(4)}</strong>${r.adjR2 ? ` · Adj R² = ${r.adjR2.toFixed(4)}` : ''} · RMSE = ${r.rmse.toFixed(4)}</div>`; if (r.coefficients && r.coefficients[0].se) h += `<table class="result-table"><thead><tr><th>Term</th><th>Estimate</th><th>SE</th><th>t</th><th>P</th></tr></thead><tbody>${r.coefficients.map(c => `<tr><td>${c.term}</td><td class="result-value">${c.est.toFixed(4)}</td><td>${c.se.toFixed(4)}</td><td>${c.t.toFixed(3)}</td><td class="${c.p < .05 ? 'result-significant' : 'result-not-significant'}">${c.p.toFixed(4)}</td></tr>`).join('')}</tbody></table>`; h += `<div class="result-chart"><canvas id="reg-fit"></canvas></div><div class="result-chart"><canvas id="reg-res"></canvas></div></div>`; U.html('reg-results', h); dm.analysisCount++; setTimeout(() => { viz.scatter('reg-fit', x.slice(0, n), y.slice(0, n), { title: 'Fitted Line', xLabel: pred, yLabel: resp, trendline: true }); if (r.residuals) viz.scatter('reg-res', r.yHat, r.residuals, { title: 'Residuals vs Fitted', xLabel: 'Fitted', yLabel: 'Residual' }) }, 100) } catch (e) { U.toast('Error: ' + e.message, 'error') } });
 }
 function initAnova() { U.on('btn-run-anova', 'click', () => { if (!dm.hasData()) return; const resp = U.el('anova-response').value, f1 = U.el('anova-factor1').value; if (!resp || !f1) return; const cats = dm.getUniqueValues(f1), groups = cats.map(c => dm.data.filter(r => r[f1] === c).map(r => Number(r[resp])).filter(v => !isNaN(v))); const r = StatisticsEngine.oneWayAnova(groups); let h = `<div class="result-section"><h4><i class="fas fa-layer-group"></i> ANOVA Table</h4><table class="result-table"><thead><tr><th>Source</th><th>SS</th><th>DF</th><th>MS</th><th>F</th><th>P</th></tr></thead><tbody>${r.table.map(t => `<tr><td>${t.source}</td><td>${typeof t.ss === 'number' ? t.ss.toFixed(2) : t.ss}</td><td>${t.df}</td><td>${typeof t.ms === 'number' ? t.ms.toFixed(2) : ''}</td><td>${typeof t.f === 'number' ? t.f.toFixed(3) : ''}</td><td class="${typeof t.p === 'number' && t.p < .05 ? 'result-significant' : ''}">${typeof t.p === 'number' ? t.p.toFixed(4) : ''}</td></tr>`).join('')}</tbody></table><div class="result-summary">${r.conclusion}</div><div class="result-chart"><canvas id="anova-box"></canvas></div></div>`; U.html('anova-results', h); dm.analysisCount++; setTimeout(() => viz.boxPlot('anova-box', groups, cats.map(String), { title: `${resp} by ${f1}`, xLabel: f1, yLabel: resp }), 100) }) }
-function initCorrelation() { U.on('btn-run-correlation', 'click', () => { const cols = [...document.querySelectorAll('#corr-var-list input:checked')].map(c => c.value); if (cols.length < 2) { U.toast('Select 2+ variables', 'warning'); return } const matrix = StatisticsEngine.correlationMatrix(cols, dm); let h = `<div class="result-section"><h4><i class="fas fa-bezier-curve"></i> Correlation Heatmap</h4><div class="heatmap-container"><table class="heatmap-table"><thead><tr><th></th>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>${matrix.map((row, i) => `<tr><th>${cols[i]}</th>${row.map(v => `<td style="background:${U.colorScale(v)}">${v.toFixed(2)}</td>`).join('')}</tr>`).join('')}</tbody></table></div></div>`; h += `<div class="result-section"><h4>Pairwise Details</h4><table class="result-table"><thead><tr><th>Var 1</th><th>Var 2</th><th>r</th><th>R²</th><th>P</th><th>Strength</th></tr></thead><tbody>`; for (let i = 0; i < cols.length; i++)for (let j = i + 1; j < cols.length; j++) { const x = dm.getNumericValues(cols[i]), y = dm.getNumericValues(cols[j]), n = Math.min(x.length, y.length), c = StatisticsEngine.correlation(x.slice(0, n), y.slice(0, n)); h += `<tr><td>${cols[i]}</td><td>${cols[j]}</td><td class="result-value">${c.r.toFixed(4)}</td><td>${c.rSquared.toFixed(4)}</td><td class="${c.significant ? 'result-significant' : ''}">${c.pValue.toFixed(4)}</td><td>${c.strength} ${c.direction}</td></tr>` } h += `</tbody></table></div><div class="result-chart"><canvas id="corr-scatter"></canvas></div>`; U.html('corr-results', h); dm.analysisCount++; if (cols.length >= 2) setTimeout(() => viz.scatter('corr-scatter', dm.getNumericValues(cols[0]), dm.getNumericValues(cols[1]), { title: `${cols[0]} vs ${cols[1]}`, xLabel: cols[0], yLabel: cols[1], trendline: true }), 100) }) }
+function initCorrelation() {
+    // When target changes, rebuild the feature checkboxes (exclude target itself)
+    U.on('corr-target', 'change', buildCorrFeatureList);
+    U.on('btn-run-correlation', 'click', runTargetCorrelation);
+}
+function buildCorrFeatureList() {
+    const target = U.el('corr-target')?.value;
+    const numCols = dm.getNumericColumns().filter(c => c !== target);
+    const list = U.el('corr-var-list');
+    if (!list) return;
+    list.innerHTML = numCols.map(c =>
+        `<div class="form-check"><input type="checkbox" class="corr-feature-check" value="${c}" id="cfc-${c.replace(/\W/g, '_')}" checked>
+         <label for="cfc-${c.replace(/\W/g, '_')}" style="font-size:12px">${c}</label></div>`
+    ).join('');
+}
+window.buildCorrFeatureList = buildCorrFeatureList;
+function runTargetCorrelation() {
+    if (!dm.hasData()) { U.toast('Load data first', 'warning'); return; }
+    const target = U.el('corr-target')?.value;
+    if (!target) { U.toast('Select a target variable', 'warning'); return; }
+    const features = [...document.querySelectorAll('.corr-feature-check:checked')].map(c => c.value);
+    if (!features.length) { U.toast('Select at least one feature', 'warning'); return; }
+
+    const yVals = dm.getNumericValues(target);
+
+    // Compute correlation of each feature vs target
+    const results = features.map(f => {
+        const xVals = dm.getNumericValues(f);
+        const n = Math.min(xVals.length, yVals.length);
+        const c = StatisticsEngine.correlation(xVals.slice(0, n), yVals.slice(0, n));
+        return { feature: f, r: c.r, r2: c.rSquared, p: c.pValue, strength: c.strength, direction: c.direction, significant: c.significant, xVals: xVals.slice(0, n), yVals: yVals.slice(0, n) };
+    }).sort((a, b) => Math.abs(b.r) - Math.abs(a.r)); // Sort by |r| descending
+
+    // Build HTML
+    let h = '';
+
+    // 1. Summary bar chart
+    h += `<div class="result-section"><h4><i class="fas fa-chart-bar"></i> Correlation with <strong style="color:var(--accent)">${target}</strong> — Ranked</h4>
+        <div class="result-chart" style="height:${Math.max(200, results.length * 40)}px"><canvas id="corr-bar-chart"></canvas></div></div>`;
+
+    // 2. Heatmap row (single row showing each feature r vs target)
+    h += `<div class="result-section"><h4><i class="fas fa-th"></i> Heatmap — Features vs ${target}</h4>
+        <div class="heatmap-container"><table class="heatmap-table"><thead><tr><th>${target}</th>${results.map(r => `<th title="${r.r.toFixed(4)}">${r.feature}</th>`).join('')}</tr></thead>
+        <tbody><tr><th>${target}</th>${results.map(r => `<td style="background:${U.colorScale(r.r)};font-weight:600">${r.r.toFixed(2)}</td>`).join('')}</tr></tbody></table></div></div>`;
+
+    // 3. Ranked table — all metrics vs target only
+    h += `<div class="result-section"><h4><i class="fas fa-table"></i> Pairwise Details — vs <strong style="color:var(--accent)">${target}</strong></h4>
+        <table class="result-table"><thead><tr>
+            <th>Rank</th><th>Feature</th>
+            <th>r</th><th>R²</th><th>P-Value</th>
+            <th title="VIF = 1/(1-R²)">VIF</th>
+            <th>Strength</th>
+        </tr></thead><tbody>
+        ${results.map((r, i) => {
+        const vif = r.r2 >= 0.9999 ? '\u221e' : (1 / (1 - r.r2)).toFixed(3);
+        const vifNum = r.r2 < 0.9999 ? 1 / (1 - r.r2) : Infinity;
+        const vifColor = vifNum > 10 ? 'var(--danger)' : vifNum > 5 ? 'var(--warning)' : 'var(--success)';
+        return `<tr>
+                <td><strong>#${i + 1}</strong></td>
+                <td><strong>${r.feature}</strong></td>
+                <td class="result-value" style="color:${r.r > 0 ? 'var(--success)' : 'var(--danger)'}">${r.r.toFixed(4)}</td>
+                <td>${r.r2.toFixed(4)}</td>
+                <td class="${r.significant ? 'result-significant' : 'result-not-significant'}">${r.p.toFixed(4)}</td>
+                <td style="color:${vifColor};font-weight:600">${vif}</td>
+                <td>${r.strength} ${r.direction}</td>
+            </tr>`;
+    }).join('')}</tbody></table></div>`;
+
+    // 4. Individual scatter plots (top 6)
+    const topN = results.slice(0, 6);
+    h += `<div class="result-section"><h4><i class="fas fa-braille"></i> Scatter Plots — Top ${topN.length} Features vs ${target}</h4>`;
+    h += `<div class="grid-${topN.length <= 2 ? '2' : topN.length <= 4 ? '2' : '3'}" style="gap:16px">`;
+    topN.forEach((r, i) => {
+        h += `<div class="card"><div class="card-header"><h3 style="font-size:12px">${r.feature} vs ${target} <span style="color:${Math.abs(r.r) > .7 ? 'var(--success)' : Math.abs(r.r) > .4 ? 'var(--warning)' : 'var(--text-muted)'}">r=${r.r.toFixed(3)}</span></h3></div>
+              <div class="card-body"><div class="result-chart"><canvas id="corr-sc-${i}"></canvas></div></div></div>`;
+    });
+    h += `</div></div>`;
+
+    U.html('corr-results', h);
+    dm.analysisCount++;
+
+    setTimeout(() => {
+        // Bar chart (horizontal sorted by r)
+        const barEl = U.el('corr-bar-chart');
+        if (barEl) {
+            const labels = results.map(r => r.feature);
+            const data = results.map(r => r.r);
+            const bgColors = data.map(v => v > 0 ? 'rgba(16,185,129,0.7)' : 'rgba(239,68,68,0.7)');
+            new Chart(barEl, {
+                type: 'bar',
+                data: { labels, datasets: [{ label: `r with ${target}`, data, backgroundColor: bgColors, borderColor: bgColors.map(c => c.replace('0.7', '1')), borderWidth: 1 }] },
+                options: {
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` r = ${ctx.raw.toFixed(4)}` } } },
+                    scales: { x: { min: -1, max: 1, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#94a3b8' } }, y: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { display: false } } }
+                }
+            });
+        }
+        // Scatter plots per feature
+        topN.forEach((r, i) => {
+            const el = U.el(`corr-sc-${i}`);
+            if (el) viz.scatter(`corr-sc-${i}`, r.xVals, r.yVals, { xLabel: r.feature, yLabel: target, title: '', trendline: true });
+        });
+    }, 150);
+}
 function initControlCharts() { U.on('cc-type', 'change', e => { U.el('cc-subgroup-group').style.display = e.target.value === 'xbar-r' ? '' : 'none' }); U.on('btn-run-cc', 'click', () => { if (!dm.hasData()) return; const v = U.el('cc-variable').value; if (!v) { U.toast('Select variable', 'warning'); return } const vals = dm.getNumericValues(v), t = U.el('cc-type').value, sg = +U.el('cc-subgroup-size').value || 5; try { let r; if (t === 'i-mr') r = StatisticsEngine.iMRChart(vals); else r = StatisticsEngine.xbarRChart(vals, sg); let h = ''; if (r.xbar) { h += `<div class="result-section"><h4><i class="fas fa-wave-square"></i> X̄ Chart</h4><div class="result-chart"><canvas id="cc-x"></canvas></div><div class="result-summary">CL=${r.xbar.cl.toFixed(4)} · UCL=${r.xbar.ucl.toFixed(4)} · LCL=${r.xbar.lcl.toFixed(4)}</div></div><div class="result-section"><h4>R Chart</h4><div class="result-chart"><canvas id="cc-r"></canvas></div></div>` } if (r.individuals) { h += `<div class="result-section"><h4><i class="fas fa-wave-square"></i> I Chart</h4><div class="result-chart"><canvas id="cc-i"></canvas></div><div class="result-summary">CL=${r.individuals.cl.toFixed(4)} · UCL=${r.individuals.ucl.toFixed(4)} · LCL=${r.individuals.lcl.toFixed(4)}</div></div><div class="result-section"><h4>MR Chart</h4><div class="result-chart"><canvas id="cc-mr"></canvas></div></div>` } U.html('cc-results', h); dm.analysisCount++; setTimeout(() => { if (r.xbar) { viz.controlChart('cc-x', r.xbar, { title: 'X̄ Chart', yLabel: v }); viz.controlChart('cc-r', r.range, { title: 'R Chart', yLabel: 'Range' }) } if (r.individuals) { viz.controlChart('cc-i', r.individuals, { title: 'I Chart', yLabel: v }); viz.controlChart('cc-mr', r.mr, { title: 'MR Chart', yLabel: 'MR' }) } }, 100) } catch (e) { U.toast('Error: ' + e.message, 'error') } }) }
 function initCapability() { U.on('btn-run-capability', 'click', () => { if (!dm.hasData()) return; const v = U.el('cap-variable').value, lsl = +U.el('cap-lsl').value, usl = +U.el('cap-usl').value; if (!v || isNaN(lsl) || isNaN(usl)) { U.toast('Enter variable and limits', 'warning'); return } const vals = dm.getNumericValues(v), r = StatisticsEngine.capability(vals, lsl, usl, +U.el('cap-target').value || (lsl + usl) / 2); const gc = v => v >= 1.33 ? 'gauge-good' : v >= 1 ? 'gauge-warn' : 'gauge-bad'; U.html('cap-results', `<div class="result-section"><h4><i class="fas fa-bullseye"></i> ${v}</h4><div class="capability-gauges"><div class="gauge-card"><div class="gauge-value ${gc(r.cp)}">${r.cp.toFixed(3)}</div><div class="gauge-label">Cp</div></div><div class="gauge-card"><div class="gauge-value ${gc(r.cpk)}">${r.cpk.toFixed(3)}</div><div class="gauge-label">Cpk</div></div><div class="gauge-card"><div class="gauge-value ${gc(r.pp)}">${r.pp.toFixed(3)}</div><div class="gauge-label">Pp</div></div><div class="gauge-card"><div class="gauge-value ${gc(r.ppk)}">${r.ppk.toFixed(3)}</div><div class="gauge-label">Ppk</div></div><div class="gauge-card"><div class="gauge-value">${r.sigmaLevel}σ</div><div class="gauge-label">Sigma</div></div></div><div class="result-summary">PPM Total: ${r.ppmTotal.toLocaleString()} · Rating: <span class="${r.rating === 'Capable' ? 'result-significant' : 'result-not-significant'}">${r.rating}</span></div><div class="result-chart"><canvas id="cap-ch"></canvas></div></div>`); dm.analysisCount++; setTimeout(() => viz.capabilityChart('cap-ch', vals, lsl, usl, r.target, { title: `Capability: ${v}` }), 100) }) }
 function initPareto() { U.on('btn-run-pareto', 'click', () => { if (!dm.hasData()) return; const c = U.el('pareto-category').value; if (!c) return; const d = StatisticsEngine.pareto(dm.getColumnValues(c).filter(v => v != null)); U.html('pareto-results', `<div class="result-section"><h4><i class="fas fa-sort-amount-down"></i> ${c}</h4><div class="result-chart"><canvas id="par-ch"></canvas></div><table class="result-table"><thead><tr><th>Category</th><th>Count</th><th>%</th><th>Cum%</th></tr></thead><tbody>${d.map(x => `<tr><td>${x.category}</td><td class="result-value">${x.count}</td><td>${x.pct.toFixed(1)}%</td><td>${x.cumulative.toFixed(1)}%</td></tr>`).join('')}</tbody></table></div>`); dm.analysisCount++; setTimeout(() => viz.paretoChart('par-ch', d, { title: `Pareto: ${c}` }), 100) }) }
