@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const el = document.getElementById(`page-${id}`);
         if (el && CanvasPages[fn]) el.innerHTML = CanvasPages[fn]();
     });
-    // Re-update var dropdowns for automl
+    // Re-update var dropdowns for automl — use 300ms to ensure app.js init is fully done
     setTimeout(() => {
         if (typeof updateVarDropdowns === 'function') updateVarDropdowns();
         initPipeline(); initQuickInsights(); initAutoML(); initWhatIf();
@@ -19,7 +19,15 @@ document.addEventListener('DOMContentLoaded', () => {
         PAGE_TITLES['quick-insights'] = 'Quick Insights';
         PAGE_TITLES['automl'] = 'AutoML Studio';
         PAGE_TITLES['what-if'] = 'What-If Analysis';
-    }, 100);
+        // Patch navigateTo to always refresh dropdowns when entering automl page
+        const _origNavigate = window.navigateTo;
+        window.navigateTo = function (page) {
+            _origNavigate(page);
+            if (page === 'automl' && typeof updateVarDropdowns === 'function') {
+                updateVarDropdowns();
+            }
+        };
+    }, 300);
 });
 
 /* ---- Pipeline Builder ---- */
@@ -359,98 +367,6 @@ function generateInsights() {
         }, 200);
     }
 }
-function generateInsights() {
-    if (!dm.hasData()) { U.toast('Load data first', 'warning'); return; }
-    U.toast('Analyzing data...', 'info');
-    const container = U.el('insights-container');
-    let html = '';
-    const numCols = dm.getNumericColumns();
-    const catCols = dm.getCategoricalColumns();
-    const profiles = dm.profileAll();
-
-    // 1. Data Overview insight
-    const overallQ = Math.round(profiles.reduce((s, p) => s + p.qualityPct, 0) / profiles.length * 100);
-    html += insightCard('fa-database', 'var(--gradient-1)', 'Data Overview', 'Summary',
-        `Your dataset has <strong>${dm.data.length.toLocaleString()}</strong> rows and <strong>${dm.columns.length}</strong> columns (${numCols.length} numeric, ${catCols.length} categorical). Overall data quality score: <strong>${overallQ}%</strong>.`,
-        ['auto', 'Auto-generated'], 'ins-overview');
-
-    // 2. Missing data insight
-    const missingCols = profiles.filter(p => p.missing > 0);
-    if (missingCols.length) {
-        html += insightCard('fa-exclamation-triangle', 'linear-gradient(135deg,#f59e0b,#ef4444)', 'Missing Values Detected', 'Data Quality',
-            `Found missing values in ${missingCols.length} column(s): ${missingCols.map(c => `<strong>${c.col}</strong> (${(c.missingPct * 100).toFixed(1)}%)`).join(', ')}. Consider using <em>Fill Missing</em> in Data Cleaning.`,
-            ['warning', 'Action Required'], 'ins-missing');
-    } else {
-        html += insightCard('fa-check-circle', 'var(--gradient-3)', 'No Missing Values', 'Data Quality',
-            'Your dataset has no missing values. Excellent data quality!',
-            ['success', 'All Clear'], 'ins-no-missing');
-    }
-
-    // 3. Distribution insight for top numeric column
-    if (numCols.length) {
-        const col = numCols[0];
-        const stats = StatisticsEngine.descriptive(dm.getNumericValues(col));
-        const normTest = StatisticsEngine.normalityTest(dm.getNumericValues(col));
-        html += insightCard('fa-chart-bar', 'var(--gradient-2)', `Distribution: ${col}`, 'Statistical',
-            `Mean: <strong>${stats.mean.toFixed(2)}</strong>, StdDev: <strong>${stats.std.toFixed(2)}</strong>, Skewness: <strong>${stats.skewness.toFixed(3)}</strong>. ${normTest.significant ? 'Distribution is <strong>non-normal</strong> (Jarque-Bera p=' + normTest.pValue.toFixed(4) + ')' : 'Distribution appears <strong>normal</strong> (p=' + normTest.pValue.toFixed(4) + ')'}`,
-            ['auto', 'Distribution'], 'ins-dist', true);
-    }
-
-    // 4. Correlation insight
-    if (numCols.length >= 2) {
-        let maxR = 0, pair = [];
-        for (let i = 0; i < Math.min(numCols.length, 6); i++) {
-            for (let j = i + 1; j < Math.min(numCols.length, 6); j++) {
-                const x = dm.getNumericValues(numCols[i]), y = dm.getNumericValues(numCols[j]);
-                const n = Math.min(x.length, y.length);
-                const r = Math.abs(ss.sampleCorrelation(x.slice(0, n), y.slice(0, n)));
-                if (r > maxR) { maxR = r; pair = [numCols[i], numCols[j]]; }
-            }
-        }
-        if (pair.length) {
-            html += insightCard('fa-bezier-curve', 'var(--gradient-5)', 'Strongest Correlation', 'Relationship',
-                `The strongest correlation is between <strong>${pair[0]}</strong> and <strong>${pair[1]}</strong> with r = <strong>${maxR.toFixed(3)}</strong> (${maxR > .7 ? 'Strong' : maxR > .4 ? 'Moderate' : 'Weak'}).`,
-                ['important', 'Key Finding'], 'ins-corr', true);
-        }
-    }
-
-    // 5. Outlier insight
-    if (numCols.length) {
-        const outlierCols = numCols.map(c => {
-            const p = profiles.find(pp => pp.col === c);
-            return { col: c, outliers: p?.outliers || 0 };
-        }).filter(x => x.outliers > 0);
-        if (outlierCols.length) {
-            html += insightCard('fa-exclamation-circle', 'linear-gradient(135deg,#f97316,#ef4444)', 'Outliers Detected', 'Anomaly',
-                `Outliers found in: ${outlierCols.map(x => `<strong>${x.col}</strong> (${x.outliers})`).join(', ')}. Review in Data Cleaning → Remove Outliers.`,
-                ['warning', 'Review'], 'ins-outliers');
-        }
-    }
-
-    // 6. ML Readiness
-    const readyMsg = numCols.length >= 2 ? `Your data has ${numCols.length} numeric features ready for ML. ${catCols.length > 0 ? 'Consider encoding ' + catCols.length + ' categorical column(s).' : ''} Try <strong>AutoML Studio</strong> for one-click model building.` : 'Add more numeric features for ML model building.';
-    html += insightCard('fa-robot', 'linear-gradient(135deg,#8b5cf6,#ec4899)', 'ML Readiness', 'Machine Learning', readyMsg, ['auto', 'AutoML'], 'ins-ml');
-
-    container.innerHTML = html;
-    dm.analysisCount++;
-
-    // Render insight charts
-    setTimeout(() => {
-        if (numCols.length) {
-            const cid = 'ins-dist-chart';
-            const el = U.el(cid);
-            if (el) viz.histogram(cid, dm.getNumericValues(numCols[0]), { title: numCols[0], xLabel: numCols[0] });
-        }
-        if (numCols.length >= 2) {
-            const cid = 'ins-corr-chart';
-            const el = U.el(cid);
-            if (el) {
-                const x = dm.getNumericValues(numCols[0]), y = dm.getNumericValues(numCols[1]);
-                viz.scatter(cid, x, y, { xLabel: numCols[0], yLabel: numCols[1], trendline: true });
-            }
-        }
-    }, 200);
-}
 
 function insightCard(icon, gradient, title, subtitle, body, [tagClass, tagText], id, hasChart = false) {
     return `<div class="insight-card" id="${id}">
@@ -462,19 +378,38 @@ function insightCard(icon, gradient, title, subtitle, body, [tagClass, tagText],
 
 /* ---- AutoML Studio ---- */
 function initAutoML() {
+    // Use event delegation on document so it works regardless of render timing
+    document.addEventListener('click', function (e) {
+        const opt = e.target.closest('.build-option');
+        if (opt && document.getElementById('page-automl')?.contains(opt)) {
+            document.querySelectorAll('.build-option').forEach(o => o.classList.remove('selected'));
+            opt.classList.add('selected');
+        }
+        if (e.target.id === 'btn-automl-build' || e.target.closest('#btn-automl-build')) {
+            runAutoML();
+        }
+    }, { once: false });
+    // Also directly bind in case page is already rendered
+    const btn = U.el('btn-automl-build');
+    if (btn) btn.addEventListener('click', runAutoML);
     document.querySelectorAll('.build-option').forEach(opt => {
-        opt.addEventListener('click', () => { document.querySelectorAll('.build-option').forEach(o => o.classList.remove('selected')); opt.classList.add('selected'); });
+        opt.addEventListener('click', () => {
+            document.querySelectorAll('.build-option').forEach(o => o.classList.remove('selected'));
+            opt.classList.add('selected');
+        });
     });
-    U.on('btn-automl-build', 'click', runAutoML);
 }
 
 function runAutoML() {
-    const target = U.el('aml-target').value;
-    if (!target) { U.toast('Select target variable', 'warning'); return; }
-    if (!dm.hasData()) { U.toast('Load data first', 'warning'); return; }
+    if (!dm.hasData()) { U.toast('Load data first — use Import Data or a Sample Dataset', 'warning'); return; }
+    const targetEl = U.el('aml-target');
+    if (!targetEl) { U.toast('AutoML page not loaded yet — please navigate away and back', 'error'); return; }
+    const target = targetEl.value;
+    if (!target) { U.toast('Select a target variable', 'warning'); return; }
 
     const buildType = document.querySelector('.build-option.selected')?.dataset.build || 'quick';
-    const problemType = U.el('aml-problem').value;
+    const problemEl = U.el('aml-problem');
+    const problemType = problemEl ? problemEl.value : 'auto';
     let pType = problemType;
     if (pType === 'auto') pType = dm.columnTypes[target] === 'categorical' || dm.getUniqueValues(target).length <= 10 ? 'classification' : 'regression';
 
@@ -482,11 +417,11 @@ function runAutoML() {
     dm.features = dm.getNumericColumns().filter(c => c !== target);
     dm.problemType = pType;
 
-    // Update wizard
-    ['aml-step-1', 'aml-step-2', 'aml-step-3'].forEach(id => { U.el(id).classList.add('completed'); U.el(id).classList.remove('active'); });
-    U.el('aml-step-4').classList.add('active');
-    ['aml-conn-1', 'aml-conn-2', 'aml-conn-3'].forEach(id => U.el(id).classList.add('done'));
-    U.el('aml-conn-3').classList.add('active');
+    // Update wizard (null-safe)
+    ['aml-step-1', 'aml-step-2', 'aml-step-3'].forEach(id => { const el = U.el(id); if (el) { el.classList.add('completed'); el.classList.remove('active'); } });
+    const s4 = U.el('aml-step-4'); if (s4) s4.classList.add('active');
+    ['aml-conn-1', 'aml-conn-2', 'aml-conn-3'].forEach(id => { const el = U.el(id); if (el) el.classList.add('done'); });
+    const c3 = U.el('aml-conn-3'); if (c3) c3.classList.add('active');
 
     // Show training progress
     const models = pType === 'regression'
@@ -494,6 +429,7 @@ function runAutoML() {
         : (buildType === 'quick' ? ['logistic', 'rf-cls', 'knn-cls'] : ['logistic', 'knn-cls', 'dt-cls', 'rf-cls']);
 
     const trainingDiv = U.el('automl-training');
+    if (!trainingDiv) { U.toast('AutoML page not ready. Please navigate to AutoML Studio first.', 'error'); return; }
     trainingDiv.style.display = '';
     trainingDiv.innerHTML = `<div class="automl-progress">
         <div class="progress-status"><i class="fas fa-spinner"></i> <span id="aml-status-text">Preparing data...</span></div>
@@ -520,11 +456,12 @@ function runAutoML() {
 
     const next = () => {
         if (done >= models.length) {
-            bar.style.width = '100%';
-            statusText.innerHTML = `<i class="fas fa-check-circle" style="color:var(--success)"></i> Complete! ${trainedModels.length} models trained`;
-            // Update wizard
-            U.el('aml-step-4').classList.add('completed'); U.el('aml-step-4').classList.remove('active');
-            U.el('aml-step-5').classList.add('active'); U.el('aml-conn-4').classList.add('done');
+            if (bar) bar.style.width = '100%';
+            if (statusText) statusText.innerHTML = `<i class="fas fa-check-circle" style="color:var(--success)"></i> Complete! ${trainedModels.length} models trained`;
+            // Update wizard (null-safe)
+            const s4done = U.el('aml-step-4'); if (s4done) { s4done.classList.add('completed'); s4done.classList.remove('active'); }
+            const s5 = U.el('aml-step-5'); if (s5) s5.classList.add('active');
+            const c4 = U.el('aml-conn-4'); if (c4) c4.classList.add('done');
             showAutoMLResults(pType);
             updateDashboard();
             U.toast(`AutoML complete! ${trainedModels.length} models ranked`, 'success');
@@ -561,6 +498,7 @@ function runAutoML() {
 
 function showAutoMLResults(pType) {
     const resultsDiv = U.el('automl-results');
+    if (!resultsDiv) return;
     resultsDiv.style.display = '';
     const isReg = pType === 'regression';
     const sorted = isReg
