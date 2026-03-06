@@ -30,12 +30,160 @@ function buildViz() {
 
 /* ---- Gallery ---- */
 function initGallery() {
-    const CHARTS = [{ name: 'Scatter', type: 'scatter', cat: 'relationship', icon: 'fa-braille' }, { name: 'Line', type: 'line', cat: 'trend', icon: 'fa-chart-line' }, { name: 'Bar', type: 'bar', cat: 'comparison', icon: 'fa-chart-bar' }, { name: 'Histogram', type: 'histogram', cat: 'distribution', icon: 'fa-signal' }, { name: 'Box Plot', type: 'box', cat: 'distribution', icon: 'fa-square' }, { name: 'Pie', type: 'pie', cat: 'composition', icon: 'fa-chart-pie' }, { name: 'Doughnut', type: 'doughnut', cat: 'composition', icon: 'fa-circle-notch' }, { name: 'Area', type: 'area', cat: 'trend', icon: 'fa-mountain' }, { name: 'Bubble', type: 'bubble', cat: 'relationship', icon: 'fa-circle' }, { name: 'Control', type: 'control', cat: 'trend', icon: 'fa-wave-square' }, { name: 'Pareto', type: 'pareto', cat: 'comparison', icon: 'fa-sort-amount-down' }];
     const grid = U.el('gallery-grid'); if (!grid) return;
-    CHARTS.forEach((c, i) => { const el = document.createElement('div'); el.className = 'gallery-item'; el.dataset.category = c.cat; el.innerHTML = `<div class="gallery-item-preview"><canvas id="gal-${i}"></canvas></div><div class="gallery-item-info"><h4><i class="fas ${c.icon}"></i> ${c.name}</h4></div>`; el.addEventListener('click', () => { navigateTo('viz-builder'); document.querySelectorAll('.chart-type-btn').forEach(b => b.classList.toggle('active', b.dataset.type === c.type)) }); grid.appendChild(el) });
-    setTimeout(() => { const sd = Array.from({ length: 20 }, () => Math.random() * 100); CHARTS.forEach((c, i) => { const cv = U.el(`gal-${i}`); if (!cv) return; const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6']; let cfg; const labels = sd.map((_, j) => j + 1); if (c.type === 'scatter') cfg = { type: 'scatter', data: { datasets: [{ data: sd.map((v, j) => ({ x: j, y: v })), backgroundColor: colors[0] + 'aa', pointRadius: 3 }] } }; else if (c.type === 'pie' || c.type === 'doughnut') cfg = { type: c.type, data: { labels: ['A', 'B', 'C', 'D'], datasets: [{ data: [30, 25, 20, 25], backgroundColor: colors.map(x => x + 'cc') }] } }; else if (c.type === 'bubble') cfg = { type: 'bubble', data: { datasets: [{ data: sd.slice(0, 10).map((v, j) => ({ x: j * 10, y: v, r: 3 + Math.random() * 8 })), backgroundColor: colors[4] + '88' }] } }; else cfg = { type: c.type === 'area' ? 'line' : 'line', data: { labels, datasets: [{ data: sd, borderColor: colors[0], borderWidth: 2, pointRadius: 0, tension: .3, fill: c.type === 'area' }] } }; cfg.options = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: c.type === 'pie' || c.type === 'doughnut' ? {} : { x: { display: false }, y: { display: false } } }; new Chart(cv, cfg) }) }, 200);
-    document.querySelectorAll('.gallery-filter').forEach(b => b.addEventListener('click', () => { document.querySelectorAll('.gallery-filter').forEach(x => x.classList.remove('active')); b.classList.add('active'); const f = b.dataset.filter; document.querySelectorAll('.gallery-item').forEach(it => it.style.display = f === 'all' || it.dataset.category === f ? '' : 'none') }));
+
+    const CHARTS = [
+        // 1. Basic Statistical
+        { name: 'Histogram', cat: 'basic', icon: 'fa-signal', color: '#3b82f6', desc: 'Frequency distribution', type: 'histogram', live: true },
+        { name: 'Box Plot', cat: 'basic', icon: 'fa-square', color: '#8b5cf6', desc: 'Quartile spread', type: 'box', live: true },
+        { name: 'Density Plot', cat: 'basic', icon: 'fa-water', color: '#06b6d4', desc: 'KDE smooth distribution', type: 'line', live: true },
+        { name: 'Dot Plot', cat: 'basic', icon: 'fa-ellipsis-h', color: '#10b981', desc: 'Individual data points', type: 'scatter', live: true },
+        { name: 'Probability Plot', cat: 'basic', icon: 'fa-chart-line', color: '#f59e0b', desc: 'Normal Q-Q plot', type: 'scatter', live: true },
+        { name: 'Stem-and-Leaf', cat: 'basic', icon: 'fa-list', color: '#ec4899', desc: 'Textual data distribution', type: 'bar', live: false },
+        // 2. Time Series
+        { name: 'Time Series Plot', cat: 'timeseries', icon: 'fa-chart-line', color: '#3b82f6', desc: 'Sequential observations', type: 'line', live: true },
+        { name: 'Multi-Line Series', cat: 'timeseries', icon: 'fa-stream', color: '#06b6d4', desc: 'Multiple trend lines', type: 'line', live: true },
+        { name: 'Moving Average', cat: 'timeseries', icon: 'fa-wave-square', color: '#8b5cf6', desc: 'Smoothed trend line', type: 'line', live: true },
+        { name: 'Seasonal Decomp.', cat: 'timeseries', icon: 'fa-calendar-alt', color: '#10b981', desc: 'Trend + seasonality + residual', type: 'line', live: false },
+        { name: 'Rolling Statistics', cat: 'timeseries', icon: 'fa-redo', color: '#f59e0b', desc: 'Rolling mean & std band', type: 'line', live: false },
+        { name: 'Lag Plot', cat: 'timeseries', icon: 'fa-project-diagram', color: '#ef4444', desc: 'Auto-correlation lag', type: 'scatter', live: false },
+        { name: 'Cross-Correlation', cat: 'timeseries', icon: 'fa-exchange-alt', color: '#ec4899', desc: 'Two series cross-corr', type: 'bar', live: false },
+        // 3. Relationship
+        { name: 'Scatter Plot', cat: 'relationship', icon: 'fa-braille', color: '#3b82f6', desc: 'X vs Y with trendline', type: 'scatter', live: true },
+        { name: 'Bubble Chart', cat: 'relationship', icon: 'fa-circle', color: '#06b6d4', desc: '3D relationship via size', type: 'bubble', live: true },
+        { name: 'Correlation Heatmap', cat: 'relationship', icon: 'fa-th', color: '#f97316', desc: 'Feature correlation matrix', type: 'heatmap', live: true, route: 'correlation' },
+        { name: 'Scatter Matrix', cat: 'relationship', icon: 'fa-th-large', color: '#8b5cf6', desc: 'All-pairs scatter grid', type: 'scatter', live: false },
+        { name: 'Pair Plot', cat: 'relationship', icon: 'fa-border-all', color: '#10b981', desc: 'Pairwise grid with KDE', type: 'scatter', live: false },
+        // 4. SPC
+        { name: 'X̄ Chart', cat: 'spc', icon: 'fa-wave-square', color: '#3b82f6', desc: 'Sample mean control', type: 'control', live: true, route: 'control-charts' },
+        { name: 'X̄-R Chart', cat: 'spc', icon: 'fa-wave-square', color: '#8b5cf6', desc: 'Mean & Range chart', type: 'control', live: true, route: 'control-charts' },
+        { name: 'X̄-S Chart', cat: 'spc', icon: 'fa-wave-square', color: '#06b6d4', desc: 'Mean & Std Dev chart', type: 'control', live: true, route: 'control-charts' },
+        { name: 'I-MR Chart', cat: 'spc', icon: 'fa-wave-square', color: '#10b981', desc: 'Individual & Moving Range', type: 'control', live: true, route: 'control-charts' },
+        { name: 'P Chart', cat: 'spc', icon: 'fa-percentage', color: '#f59e0b', desc: 'Proportion defective', type: 'bar', live: false },
+        { name: 'NP Chart', cat: 'spc', icon: 'fa-hashtag', color: '#ef4444', desc: 'Number defective', type: 'bar', live: false },
+        { name: 'C Chart', cat: 'spc', icon: 'fa-bug', color: '#ec4899', desc: 'Count of defects', type: 'line', live: false },
+        { name: 'U Chart', cat: 'spc', icon: 'fa-divide', color: '#f97316', desc: 'Defects per unit', type: 'line', live: false },
+        // 5. Quality
+        { name: 'Pareto Chart', cat: 'quality', icon: 'fa-sort-amount-down', color: '#3b82f6', desc: '80/20 rule analysis', type: 'pareto', live: true, route: 'pareto' },
+        { name: 'Fishbone Diagram', cat: 'quality', icon: 'fa-fish', color: '#ef4444', desc: 'Cause & Effect (Ishikawa)', type: 'fishbone', live: false },
+        { name: 'Capability Hist.', cat: 'quality', icon: 'fa-bullseye', color: '#8b5cf6', desc: 'Process capability plot', type: 'histogram', live: true, route: 'capability' },
+        { name: 'Cp / Cpk Plot', cat: 'quality', icon: 'fa-tachometer-alt', color: '#10b981', desc: 'Capability index gauges', type: 'bar', live: true, route: 'capability' },
+        // 6. Multivariate
+        { name: 'PCA Score Plot', cat: 'multivariate', icon: 'fa-compress-arrows-alt', color: '#3b82f6', desc: 'PC1 vs PC2 scores', type: 'scatter', live: false },
+        { name: 'PCA Loading Plot', cat: 'multivariate', icon: 'fa-arrows-alt', color: '#8b5cf6', desc: 'Variable loadings', type: 'scatter', live: false },
+        { name: 'Biplot', cat: 'multivariate', icon: 'fa-expand-arrows-alt', color: '#06b6d4', desc: 'Scores + loadings', type: 'scatter', live: false },
+        { name: 'Cluster Dendrogram', cat: 'multivariate', icon: 'fa-sitemap', color: '#10b981', desc: 'Hierarchical clustering', type: 'bar', live: false },
+        { name: 'Hotelling T² Chart', cat: 'multivariate', icon: 'fa-chart-area', color: '#f59e0b', desc: 'Multivariate control', type: 'line', live: false },
+        // 7. ML & AI
+        { name: 'Feature Importance', cat: 'ml', icon: 'fa-chart-bar', color: '#8b5cf6', desc: 'Ranked feature impact', type: 'bar', live: true, route: 'ml-results' },
+        { name: 'Residual Plot', cat: 'ml', icon: 'fa-project-diagram', color: '#ef4444', desc: 'Residuals vs fitted', type: 'scatter', live: true, route: 'regression' },
+        { name: 'Pred vs Actual', cat: 'ml', icon: 'fa-equals', color: '#10b981', desc: 'Model prediction quality', type: 'scatter', live: true, route: 'ml-results' },
+        { name: 'SHAP Summary Plot', cat: 'ml', icon: 'fa-layer-group', color: '#f97316', desc: 'SHAP feature attribution', type: 'bar', live: false },
+        { name: 'SHAP Dependence', cat: 'ml', icon: 'fa-bezier-curve', color: '#ec4899', desc: 'SHAP vs feature value', type: 'scatter', live: false },
+        { name: 'Partial Dependence', cat: 'ml', icon: 'fa-chart-line', color: '#06b6d4', desc: 'PDP marginal effect', type: 'line', live: false },
+        // 8. Time-Series AI
+        { name: 'Lag Correlation', cat: 'tsai', icon: 'fa-clock', color: '#3b82f6', desc: 'ACF/PACF lags', type: 'bar', live: true, route: 'timeseries' },
+        { name: 'Forecast vs Actual', cat: 'tsai', icon: 'fa-chart-line', color: '#10b981', desc: 'Predicted vs ground truth', type: 'line', live: true, route: 'forecasting' },
+        { name: 'Change Point Detect.', cat: 'tsai', icon: 'fa-exclamation', color: '#ef4444', desc: 'Structural break detection', type: 'line', live: false },
+        { name: 'Anomaly Timeline', cat: 'tsai', icon: 'fa-radiation', color: '#f97316', desc: 'Anomalies on time axis', type: 'scatter', live: false },
+        { name: 'Seasonal Pattern', cat: 'tsai', icon: 'fa-sun', color: '#f59e0b', desc: 'Seasonal cycle plot', type: 'line', live: false },
+        // 9. Causal
+        { name: 'Causal Graph', cat: 'causal', icon: 'fa-network-wired', color: '#8b5cf6', desc: 'Causal network diagram', type: 'scatter', live: false },
+        { name: 'Root Cause Tree', cat: 'causal', icon: 'fa-tree', color: '#10b981', desc: 'Hierarchy of causes', type: 'bar', live: false },
+        { name: 'Event Impact Chart', cat: 'causal', icon: 'fa-bolt', color: '#f59e0b', desc: 'Before/after event', type: 'line', live: false },
+        { name: 'Causal Effect Plot', cat: 'causal', icon: 'fa-arrows-left-right', color: '#ef4444', desc: 'Treatment effect size', type: 'scatter', live: false },
+        // 10. Industrial
+        { name: 'Process Heatmap', cat: 'industrial', icon: 'fa-th', color: '#f97316', desc: 'Process stage heatmap', type: 'heatmap', live: false },
+        { name: 'Sankey Flow Diagram', cat: 'industrial', icon: 'fa-project-diagram', color: '#3b82f6', desc: 'Flow / energy balance', type: 'bar', live: false },
+        { name: 'Sensor Network', cat: 'industrial', icon: 'fa-broadcast-tower', color: '#06b6d4', desc: 'Sensor influence graph', type: 'scatter', live: false },
+        { name: 'Process Flow Diag.', cat: 'industrial', icon: 'fa-sitemap', color: '#8b5cf6', desc: 'Interactive PFD', type: 'bar', live: false },
+        { name: 'Digital Twin Map', cat: 'industrial', icon: 'fa-robot', color: '#10b981', desc: 'Virtual process model', type: 'scatter', live: false },
+        // 11. Dashboards
+        { name: 'KPI Dashboard', cat: 'dashboard', icon: 'fa-tachometer-alt', color: '#3b82f6', desc: 'Key performance indicators', type: 'bar', live: true, route: 'dashboard' },
+        { name: 'Production Trend', cat: 'dashboard', icon: 'fa-industry', color: '#10b981', desc: 'Production KPIs over time', type: 'line', live: false },
+        { name: 'Energy Dashboard', cat: 'dashboard', icon: 'fa-bolt', color: '#f59e0b', desc: 'Energy consumption trends', type: 'line', live: false },
+        { name: 'Quality Monitor', cat: 'dashboard', icon: 'fa-check-double', color: '#8b5cf6', desc: 'Quality metrics summary', type: 'bar', live: false },
+        { name: 'Alarm Timeline', cat: 'dashboard', icon: 'fa-bell', color: '#ef4444', desc: 'Event & alarm history', type: 'scatter', live: false },
+        // 12. Advanced AI
+        { name: 'Dynamic Lag Network', cat: 'advanced', icon: 'fa-project-diagram', color: '#8b5cf6', desc: 'Time-lag dependency graph', type: 'scatter', live: false },
+        { name: 'Sensor Dependency', cat: 'advanced', icon: 'fa-link', color: '#06b6d4', desc: 'Sensor correlation map', type: 'scatter', live: false },
+        { name: 'Feature Drift Chart', cat: 'advanced', icon: 'fa-wind', color: '#f97316', desc: 'Feature distribution shift', type: 'line', live: false },
+        { name: 'Stability Radar', cat: 'advanced', icon: 'fa-broadcast-tower', color: '#10b981', desc: 'Process stability spider', type: 'bar', live: false },
+        { name: 'AI Insight Dashboard', cat: 'advanced', icon: 'fa-brain', color: '#ec4899', desc: 'Auto-generated AI insights', type: 'bar', live: true, route: 'quick-insights' },
+    ];
+
+    const catLabels = {
+        basic: '📊 Basic Statistical', timeseries: '📈 Time Series', relationship: '🔗 Relationship',
+        spc: '⚙️ SPC', quality: '🏭 Quality', multivariate: '🧬 Multivariate',
+        ml: '🤖 ML & AI', tsai: '⏱ Time-Series AI', causal: '🔍 Causal',
+        industrial: '🏗 Industrial', dashboard: '📋 Dashboards', advanced: '🚀 Advanced AI'
+    };
+
+    CHARTS.forEach((c, i) => {
+        const el = document.createElement('div');
+        el.className = 'gallery-item';
+        el.dataset.category = c.cat;
+        const badge = c.live
+            ? `<span class="gallery-badge live">Live</span>`
+            : `<span class="gallery-badge soon">Coming Soon</span>`;
+        el.innerHTML = `
+            <div class="gallery-item-preview" id="galp-${i}">
+                <canvas id="gal-${i}" style="display:none"></canvas>
+                <div class="gallery-icon-placeholder" id="galph-${i}" style="background:${c.color}22;color:${c.color}">
+                    <i class="fas ${c.icon}" style="font-size:28px"></i>
+                </div>
+            </div>
+            <div class="gallery-item-info">
+                <h4><i class="fas ${c.icon}"></i> ${c.name}</h4>
+                <p style="font-size:10px;color:var(--text-muted);margin:2px 0 4px">${c.desc}</p>
+                <div style="display:flex;justify-content:space-between;align-items:center">${badge}
+                    <span style="font-size:9px;color:var(--text-muted)">${catLabels[c.cat] || c.cat}</span>
+                </div>
+            </div>`;
+        el.addEventListener('click', () => {
+            if (c.route) { navigateTo(c.route); return; }
+            navigateTo('viz-builder');
+            document.querySelectorAll('.chart-type-btn').forEach(b => b.classList.toggle('active', b.dataset.type === c.type));
+        });
+        grid.appendChild(el);
+    });
+
+    // Render live mini-chart previews
+    setTimeout(() => {
+        const sd = Array.from({ length: 20 }, (_, i) => 20 + Math.random() * 60 + Math.sin(i / 3) * 15);
+        const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316'];
+        CHARTS.forEach((c, i) => {
+            const cv = U.el(`gal-${i}`);
+            const ph = U.el(`galph-${i}`);
+            if (!cv || !c.live) return;
+            cv.style.display = '';
+            if (ph) ph.style.display = 'none';
+            let cfg;
+            const labels = sd.map((_, j) => j + 1);
+            const col = colors[i % colors.length];
+            if (c.type === 'scatter') cfg = { type: 'scatter', data: { datasets: [{ data: sd.map((v, j) => ({ x: j * 5, y: v })), backgroundColor: col + '99', pointRadius: 3 }] } };
+            else if (c.type === 'bubble') cfg = { type: 'bubble', data: { datasets: [{ data: sd.slice(0, 10).map((v, j) => ({ x: j * 10, y: v, r: 3 + Math.random() * 6 })), backgroundColor: col + '88' }] } };
+            else if (c.type === 'pie' || c.type === 'doughnut') cfg = { type: c.type, data: { labels: ['A', 'B', 'C', 'D'], datasets: [{ data: [30, 25, 20, 25], backgroundColor: colors.slice(0, 4).map(x => x + 'cc') }] } };
+            else if (c.type === 'bar') cfg = { type: 'bar', data: { labels: labels.slice(0, 8), datasets: [{ data: sd.slice(0, 8), backgroundColor: col + 'bb', borderColor: col, borderWidth: 1 }] } };
+            else cfg = { type: 'line', data: { labels, datasets: [{ data: sd, borderColor: col, borderWidth: 2, pointRadius: 0, tension: .4, fill: c.type === 'area', backgroundColor: col + '22' }] } };
+            cfg.options = {
+                responsive: true, maintainAspectRatio: false, animation: false,
+                plugins: { legend: { display: false } },
+                scales: (c.type === 'pie' || c.type === 'doughnut') ? {} : { x: { display: false }, y: { display: false } }
+            };
+            try { new Chart(cv, cfg); } catch (e) { cv.style.display = 'none'; if (ph) ph.style.display = ''; }
+        });
+    }, 300);
+
+    // Filter buttons
+    document.querySelectorAll('.gallery-filter').forEach(b => b.addEventListener('click', () => {
+        document.querySelectorAll('.gallery-filter').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        const f = b.dataset.filter;
+        document.querySelectorAll('.gallery-item').forEach(it => it.style.display = f === 'all' || it.dataset.category === f ? '' : 'none');
+    }));
 }
+
 
 /* ---- Statistics Pages ---- */
 function initDescriptive() {
