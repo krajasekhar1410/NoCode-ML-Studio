@@ -294,13 +294,50 @@ const Pages = {
     mlModels: () => `
         <div id="ml-model-content">
             <div class="kpi-row" style="margin-bottom:18px" id="ml-train-kpi"></div>
-            <h3 style="font-size:15px;font-weight:600;margin-bottom:12px" id="ml-model-title"><i class="fas fa-brain"></i> Select Models to Train</h3>
-            <div id="ml-regression-models" style="display:none"><h4 style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">REGRESSION MODELS</h4>
-                <div class="grid-4" id="reg-model-grid"></div></div>
-            <div id="ml-classification-models" style="display:none"><h4 style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;margin-top:18px">CLASSIFICATION MODELS</h4>
-                <div class="grid-4" id="cls-model-grid"></div></div>
-            <div style="margin-top:18px;display:flex;gap:8px"><button class="btn btn-primary btn-lg" id="btn-train-models"><i class="fas fa-play"></i> Train Selected Models</button><button class="btn btn-lg" id="btn-train-all"><i class="fas fa-forward"></i> Train All</button></div>
-            <div id="training-progress" style="margin-top:18px;display:none"><div class="loading-bar" style="width:100%;margin-bottom:10px"><div class="loading-bar-fill" id="train-progress-bar" style="animation:none"></div></div><p id="train-status" style="font-size:12px;color:var(--text-secondary)">Training...</p></div>
+
+            <!-- Problem Type Toggle -->
+            <div class="ml-type-toggle-bar" id="ml-type-toggle-bar">
+                <span style="font-size:13px;font-weight:600;color:var(--text-secondary)"><i class="fas fa-sliders-h"></i> Problem Type:</span>
+                <button class="ml-type-btn active" id="ml-btn-regression" onclick="switchMLView('regression')"><i class="fas fa-chart-line"></i> Regression</button>
+                <button class="ml-type-btn" id="ml-btn-classification" onclick="switchMLView('classification')"><i class="fas fa-tags"></i> Classification</button>
+                <button class="ml-type-btn" id="ml-btn-both" onclick="switchMLView('both')"><i class="fas fa-layer-group"></i> Both</button>
+            </div>
+
+            <!-- REGRESSION MODELS -->
+            <div id="ml-regression-models" style="display:none">
+                <div class="ml-section-header">
+                    <h4><i class="fas fa-chart-line" style="color:#3b82f6"></i> Regression Models</h4>
+                    <span class="ml-section-badge reg">Predict continuous values · Metrics: R², RMSE, MAE</span>
+                </div>
+                <div class="grid-4" id="reg-model-grid"></div>
+            </div>
+
+            <!-- CLASSIFICATION MODELS -->
+            <div id="ml-classification-models" style="display:none;margin-top:22px">
+                <div class="ml-section-header">
+                    <h4><i class="fas fa-tags" style="color:#8b5cf6"></i> Classification Models</h4>
+                    <span class="ml-section-badge cls">Predict categories · Metrics: Accuracy, F1, Precision, Recall</span>
+                </div>
+                <div class="grid-4" id="cls-model-grid"></div>
+            </div>
+
+            <!-- Hyperparameter Panel -->
+            <div id="ml-hyperparam-panel" style="display:none;margin-top:22px">
+                <div class="ml-section-header">
+                    <h4><i class="fas fa-sliders-h" style="color:#f59e0b"></i> Hyperparameter Tuning</h4>
+                    <span class="ml-section-badge" style="background:rgba(245,158,11,0.15);color:#f59e0b">Configure selected model parameters</span>
+                </div>
+                <div class="hyper-grid" id="hyper-grid"></div>
+            </div>
+
+            <div style="margin-top:22px;display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn btn-primary btn-lg" id="btn-train-models"><i class="fas fa-play"></i> Train Selected Models</button>
+                <button class="btn btn-lg" id="btn-train-all"><i class="fas fa-forward"></i> Train All Visible</button>
+            </div>
+            <div id="training-progress" style="margin-top:18px;display:none">
+                <div class="loading-bar" style="width:100%;margin-bottom:10px"><div class="loading-bar-fill" id="train-progress-bar" style="animation:none"></div></div>
+                <p id="train-status" style="font-size:12px;color:var(--text-secondary)">Training...</p>
+            </div>
         </div>`,
 
     mlResults: () => `<div id="ml-results-content"><div class="empty-state"><i class="fas fa-trophy"></i><h3>No Results Yet</h3><p>Train models first to see comparison and results</p></div></div>`,

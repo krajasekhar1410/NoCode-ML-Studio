@@ -321,87 +321,456 @@ function initForecasting() {
 }
 
 /* ---- ML ---- */
+
+// Hyperparameter definitions per model
+const MODEL_HYPERPARAMS = {
+    'linear': [],
+    'ridge': [{ key: 'lambda', label: 'Lambda (L2)', type: 'range', min: 0.01, max: 10, step: 0.01, default: 1.0 }],
+    'lasso': [{ key: 'lambda', label: 'Lambda (L1)', type: 'range', min: 0.01, max: 10, step: 0.01, default: 1.0 }],
+    'poly': [{ key: 'degree', label: 'Degree', type: 'select', options: [2, 3, 4, 5], default: 2 }],
+    'knn-reg': [{ key: 'k', label: 'K Neighbors', type: 'range', min: 1, max: 20, step: 1, default: 5 }],
+    'dt-reg': [{ key: 'depth', label: 'Max Depth', type: 'range', min: 1, max: 15, step: 1, default: 5 }],
+    'rf-reg': [{ key: 'trees', label: 'N Trees', type: 'range', min: 2, max: 50, step: 1, default: 10 }, { key: 'depth', label: 'Max Depth', type: 'range', min: 1, max: 10, step: 1, default: 4 }],
+    'logistic': [{ key: 'lr', label: 'Learning Rate', type: 'select', options: [0.001, 0.005, 0.01, 0.05, 0.1], default: 0.01 }, { key: 'epochs', label: 'Epochs', type: 'range', min: 50, max: 500, step: 50, default: 200 }],
+    'knn-cls': [{ key: 'k', label: 'K Neighbors', type: 'range', min: 1, max: 20, step: 1, default: 5 }],
+    'dt-cls': [{ key: 'depth', label: 'Max Depth', type: 'range', min: 1, max: 15, step: 1, default: 5 }],
+    'rf-cls': [{ key: 'trees', label: 'N Trees', type: 'range', min: 2, max: 50, step: 1, default: 10 }, { key: 'depth', label: 'Max Depth', type: 'range', min: 1, max: 10, step: 1, default: 4 }]
+};
+
+const REG_MODELS = [
+    { name: 'Linear Regression', icon: 'fa-chart-line', desc: 'Ordinary least squares', id: 'linear', color: '#3b82f6' },
+    { name: 'Ridge Regression', icon: 'fa-mountain', desc: 'L2 regularization (alpha)', id: 'ridge', color: '#06b6d4' },
+    { name: 'Lasso Regression', icon: 'fa-compress-alt', desc: 'L1 regularization', id: 'lasso', color: '#8b5cf6' },
+    { name: 'Polynomial Reg.', icon: 'fa-bezier-curve', desc: 'Non-linear polynomial fit', id: 'poly', color: '#ec4899' },
+    { name: 'KNN Regression', icon: 'fa-project-diagram', desc: 'K-nearest neighbors', id: 'knn-reg', color: '#10b981' },
+    { name: 'Decision Tree Reg.', icon: 'fa-sitemap', desc: 'Tree-based regression', id: 'dt-reg', color: '#f59e0b' },
+    { name: 'Random Forest Reg.', icon: 'fa-tree', desc: 'Ensemble of trees', id: 'rf-reg', color: '#f97316' }
+];
+const CLS_MODELS = [
+    { name: 'Logistic Regression', icon: 'fa-divide', desc: 'Sigmoid classifier', id: 'logistic', color: '#8b5cf6' },
+    { name: 'KNN Classifier', icon: 'fa-project-diagram', desc: 'K-nearest neighbors', id: 'knn-cls', color: '#3b82f6' },
+    { name: 'Decision Tree Cls.', icon: 'fa-sitemap', desc: 'Tree classifier', id: 'dt-cls', color: '#10b981' },
+    { name: 'Random Forest Cls.', icon: 'fa-tree', desc: 'Ensemble classifier', id: 'rf-cls', color: '#f97316' }
+];
+
+let currentMLView = 'regression'; // 'regression', 'classification', or 'both'
+
+window.switchMLView = function (view) {
+    currentMLView = view;
+    document.querySelectorAll('.ml-type-btn').forEach(b => b.classList.remove('active'));
+    const btnMap = { regression: 'ml-btn-regression', classification: 'ml-btn-classification', both: 'ml-btn-both' };
+    const btn = U.el(btnMap[view]); if (btn) btn.classList.add('active');
+    U.el('ml-regression-models').style.display = (view === 'regression' || view === 'both') ? '' : 'none';
+    U.el('ml-classification-models').style.display = (view === 'classification' || view === 'both') ? '' : 'none';
+};
+
+function getModelCardHTML(m) {
+    const grad = m.color ? `background:${m.color}22;border:1.5px solid ${m.color}44` : 'background:var(--bg-hover)';
+    return `<div class="model-card" data-model="${m.id}" onclick="onModelCardClick(this)" style="cursor:pointer">
+        <div class="model-icon" style="background:${m.color || 'var(--accent)'}22;color:${m.color || 'var(--accent)'}">
+            <i class="fas ${m.icon}"></i>
+        </div>
+        <h4>${m.name}</h4>
+        <p>${m.desc}</p>
+        <div class="model-card-footer">
+            ${MODEL_HYPERPARAMS[m.id]?.length ? `<span class="model-has-hp"><i class="fas fa-sliders-h"></i> ${MODEL_HYPERPARAMS[m.id].length} param${MODEL_HYPERPARAMS[m.id].length > 1 ? 's' : ''}</span>` : '<span class="model-no-hp">No tuning needed</span>'}
+        </div>
+    </div>`;
+}
+
+window.onModelCardClick = function (el) {
+    el.classList.toggle('selected');
+    updateHyperparamPanel();
+};
+
+function updateHyperparamPanel() {
+    const selected = [...document.querySelectorAll('.model-card.selected')];
+    const panel = U.el('ml-hyperparam-panel');
+    const grid = U.el('hyper-grid');
+    if (!panel || !grid) return;
+    const withParams = selected.filter(c => {
+        const id = c.dataset.model;
+        return MODEL_HYPERPARAMS[id] && MODEL_HYPERPARAMS[id].length > 0;
+    });
+    if (!withParams.length) { panel.style.display = 'none'; return; }
+    panel.style.display = '';
+    let h = '';
+    withParams.forEach(c => {
+        const id = c.dataset.model;
+        const modelDef = [...REG_MODELS, ...CLS_MODELS].find(m => m.id === id);
+        const params = MODEL_HYPERPARAMS[id];
+        h += `<div class="hyper-card">
+            <div class="hyper-card-title"><i class="fas ${modelDef?.icon || 'fa-cog'}"></i> ${modelDef?.name || id}</div>`;
+        params.forEach(p => {
+            const uid = `hp-${id}-${p.key}`;
+            if (p.type === 'range') {
+                h += `<div class="hyper-param">
+                    <label>${p.label}: <strong id="${uid}-val">${p.default}</strong></label>
+                    <input type="range" class="form-range" id="${uid}" min="${p.min}" max="${p.max}" step="${p.step}" value="${p.default}"
+                        oninput="document.getElementById('${uid}-val').textContent=this.value">
+                </div>`;
+            } else if (p.type === 'select') {
+                h += `<div class="hyper-param">
+                    <label>${p.label}</label>
+                    <select class="form-control" id="${uid}">${p.options.map(o => `<option value="${o}"${o == p.default ? ' selected' : ''}>${o}</option>`).join('')}</select>
+                </div>`;
+            }
+        });
+        h += `</div>`;
+    });
+    grid.innerHTML = h;
+}
+
+function getHyperParam(modelId, paramKey, defaultVal) {
+    const el = U.el(`hp-${modelId}-${paramKey}`);
+    if (!el) return defaultVal;
+    return Number(el.value);
+}
+
 function initMLSetup() {
     U.on('ml-test-split', 'input', e => U.html('ml-split-val', e.target.value + '%'));
     U.on('btn-ml-prepare', 'click', () => {
-        const target = U.el('ml-target').value; if (!target) { U.toast('Select target', 'warning'); return }
-        dm.target = target; dm.features = [...document.querySelectorAll('.ml-feature-check:checked')].map(c => c.value).filter(c => c !== target);
-        if (!dm.features.length) { U.toast('Select features', 'warning'); return }
-        const pType = U.el('ml-problem-type').value; let problemType = pType;
+        const target = U.el('ml-target').value;
+        if (!target) { U.toast('Select target', 'warning'); return; }
+        dm.target = target;
+        dm.features = [...document.querySelectorAll('.ml-feature-check:checked')].map(c => c.value).filter(c => c !== target);
+        if (!dm.features.length) { U.toast('Select features', 'warning'); return; }
+        const pType = U.el('ml-problem-type').value;
+        let problemType = pType;
         if (pType === 'auto') problemType = dm.columnTypes[target] === 'categorical' || dm.columnTypes[target] === 'boolean' || dm.getUniqueValues(target).length <= 10 ? 'classification' : 'regression';
         dm.problemType = problemType;
-        U.html('ml-preview', `<div class="result-summary"><strong>Target:</strong> ${target} (${problemType})<br><strong>Features:</strong> ${dm.features.join(', ')}<br><strong>Rows:</strong> ${dm.data.length}<br><strong>Test Split:</strong> ${U.el('ml-test-split').value}%</div><p style="margin-top:12px;color:var(--success)"><i class="fas fa-check-circle"></i> Dataset prepared. Go to Model Training.</p>`);
+        U.html('ml-preview', `<div class="result-summary"><strong>Target:</strong> ${target} (${problemType})<br><strong>Features:</strong> ${dm.features.join(', ')}<br><strong>Rows:</strong> ${dm.data.length}<br><strong>Test Split:</strong> ${U.el('ml-test-split').value}%</div><p style="margin-top:12px;color:var(--success)"><i class="fas fa-check-circle"></i> Dataset prepared. Go to Model Training → Select any models.</p>`);
         U.toast('Dataset prepared', 'success');
         setupModelCards(problemType);
     });
 }
+
 function setupModelCards(type) {
-    const regModels = [{ name: 'Linear Regression', icon: 'fa-chart-line', desc: 'Ordinary least squares', id: 'linear' }, { name: 'Ridge Regression', icon: 'fa-mountain', desc: 'L2 regularized', id: 'ridge' }, { name: 'Lasso Regression', icon: 'fa-compress-alt', desc: 'L1 regularized', id: 'lasso' }, { name: 'Polynomial', icon: 'fa-bezier-curve', desc: 'Nonlinear polynomial', id: 'poly' }, { name: 'KNN Regression', icon: 'fa-project-diagram', desc: 'K-nearest neighbors', id: 'knn-reg' }, { name: 'Decision Tree', icon: 'fa-sitemap', desc: 'Tree-based regression', id: 'dt-reg' }, { name: 'Random Forest', icon: 'fa-tree', desc: 'Ensemble of trees', id: 'rf-reg' }];
-    const clsModels = [{ name: 'Logistic Regression', icon: 'fa-divide', desc: 'Binary/multi classification', id: 'logistic' }, { name: 'KNN Classifier', icon: 'fa-project-diagram', desc: 'K-nearest neighbors', id: 'knn-cls' }, { name: 'Decision Tree', icon: 'fa-sitemap', desc: 'Tree classifier', id: 'dt-cls' }, { name: 'Random Forest', icon: 'fa-tree', desc: 'Ensemble classifier', id: 'rf-cls' }];
-    const models = type === 'regression' ? regModels : clsModels;
-    const gridId = type === 'regression' ? 'reg-model-grid' : 'cls-model-grid';
-    U.el('ml-regression-models').style.display = type === 'regression' ? '' : 'none';
-    U.el('ml-classification-models').style.display = type === 'classification' ? '' : 'none';
-    U.html(gridId, models.map(m => `<div class="model-card" data-model="${m.id}" onclick="this.classList.toggle('selected')"><div class="model-icon" style="background:var(--gradient-1)"><i class="fas ${m.icon}"></i></div><h4>${m.name}</h4><p>${m.desc}</p></div>`).join(''));
+    U.html('reg-model-grid', REG_MODELS.map(getModelCardHTML).join(''));
+    U.html('cls-model-grid', CLS_MODELS.map(getModelCardHTML).join(''));
+    // Default: switch view to match problem type, but allow user to change
+    if (type === 'both') switchMLView('both');
+    else switchMLView(type);
 }
 function initMLModels() {
     U.on('btn-train-models', 'click', () => trainModels(false));
     U.on('btn-train-all', 'click', () => trainModels(true));
 }
+
+function getVisibleModelIds() {
+    return [...document.querySelectorAll('.model-card')].filter(c => {
+        const section = c.closest('#ml-regression-models, #ml-classification-models');
+        return section && section.style.display !== 'none';
+    }).map(c => c.dataset.model);
+}
+
+// Permutation feature importance: shuffle one feature, measure score drop
+function computeFeatureImportance(model, XTestCols, yTest) {
+    if (!XTestCols.length || !XTestCols[0].length) return [];
+    const baseScore = model.type === 'regression'
+        ? MLEngine.regressionMetrics(yTest, yTest.map((_, i) => model.predict(XTestCols.map(c => c[i]))), yTest, yTest.map((_, i) => model.predict(XTestCols.map(c => c[i])))).testR2
+        : MLEngine.classificationMetrics(yTest, yTest.map((_, i) => model.predict(XTestCols.map(c => c[i]))), yTest, yTest.map((_, i) => model.predict(XTestCols.map(c => c[i])))).testAccuracy;
+    const importances = XTestCols.map((col, fi) => {
+        // Shuffle feature fi
+        const shuffled = [...col].sort(() => Math.random() - 0.5);
+        const XShuffled = XTestCols.map((c, j) => j === fi ? shuffled : c);
+        const predsShuffled = XShuffled[0].map((_, i) => model.predict(XShuffled.map(c => c[i])));
+        let dropScore;
+        if (model.type === 'regression') {
+            const m = yTest.reduce((s, v) => s + v, 0) / yTest.length;
+            const sst = yTest.reduce((s, v) => s + (v - m) ** 2, 0);
+            const sse = yTest.reduce((s, v, i) => s + (v - predsShuffled[i]) ** 2, 0);
+            dropScore = sst ? 1 - sse / sst : 0;
+        } else {
+            dropScore = yTest.filter((v, i) => v === predsShuffled[i]).length / yTest.length;
+        }
+        return { feature: model.features[fi], importance: Math.max(0, baseScore - dropScore) };
+    });
+    return importances.sort((a, b) => b.importance - a.importance);
+}
+
 function trainModels(all) {
-    if (!dm.target || !dm.features.length) { U.toast('Prepare dataset first in ML Setup', 'warning'); return }
-    const selected = all ? document.querySelectorAll('.model-card') : document.querySelectorAll('.model-card.selected');
-    if (!selected.length) { U.toast('Select models', 'warning'); return }
-    const ids = [...selected].map(c => c.dataset.model);
-    U.el('training-progress').style.display = ''; U.html('train-status', 'Preparing data...');
+    if (!dm.target || !dm.features.length) { U.toast('Prepare dataset first in ML Setup', 'warning'); return; }
+    const allCards = [...document.querySelectorAll('.model-card')];
+    const visibleCards = allCards.filter(c => {
+        const section = c.closest('#ml-regression-models, #ml-classification-models');
+        return section && section.style.display !== 'none';
+    });
+    const selectedCards = all ? visibleCards : visibleCards.filter(c => c.classList.contains('selected'));
+    if (!selectedCards.length) { U.toast('Select at least one model', 'warning'); return; }
+    const ids = selectedCards.map(c => c.dataset.model);
+    U.el('training-progress').style.display = '';
+    U.html('train-status', 'Preparing data...');
     const numCols = dm.features.filter(f => ['continuous', 'discrete'].includes(dm.columnTypes[f]));
+    if (!numCols.length) { U.toast('No numeric features found', 'error'); return; }
     const X = numCols.map(f => dm.getNumericValues(f));
-    let y = dm.getColumnValues(dm.target);
-    if (dm.problemType === 'classification') { const labels = [...new Set(y)]; y = y.map(v => labels.indexOf(v)); dm.targetLabels = labels } else y = y.map(Number);
-    const n = Math.min(y.length, ...X.map(c => c.length)); const XTrim = X.map(c => c.slice(0, n)), yTrim = y.slice(0, n);
-    const split = MLEngine.splitData(XTrim, yTrim, +U.el('ml-test-split').value / 100);
-    const XTr = split.XTrain[0].map((_, i) => split.XTrain.map(r => r[i])); const XTe = split.XTest[0].map((_, i) => split.XTest.map(r => r[i]));
-    const XTrainCols = XTr[0] ? XTr[0].map((_, j) => XTr.map(r => r[j])) : []; const XTestCols = XTe[0] ? XTe[0].map((_, j) => XTe.map(r => r[j])) : [];
-    trainedModels.length = 0; let done = 0;
-    const bar = U.el('train-progress-bar'); bar.style.width = '0%'; bar.style.animation = 'none';
+    // Per-model problem type determined by model id
+    const regIds = REG_MODELS.map(m => m.id);
+    // Target encoding: for regression use numeric, for classification encode labels
+    const yRaw = dm.getColumnValues(dm.target);
+    const yNumeric = yRaw.map(Number);
+    const labelsSet = [...new Set(yRaw)];
+    const yEncoded = yRaw.map(v => labelsSet.indexOf(String(v)));
+    dm.targetLabels = labelsSet;
+    const n = Math.min(yRaw.length, ...X.map(c => c.length));
+    const XTrim = X.map(c => c.slice(0, n));
+    // Split for regression models
+    const splitReg = MLEngine.splitData(XTrim, yNumeric.slice(0, n), +U.el('ml-test-split').value / 100);
+    const XTrR = splitReg.XTrain[0].map((_, i) => splitReg.XTrain.map(r => r[i]));
+    const XTeR = splitReg.XTest[0].map((_, i) => splitReg.XTest.map(r => r[i]));
+    const XTrainRegCols = XTrR[0] ? XTrR[0].map((_, j) => XTrR.map(r => r[j])) : [];
+    const XTestRegCols = XTeR[0] ? XTeR[0].map((_, j) => XTeR.map(r => r[j])) : [];
+    // Split for classification models
+    const splitCls = MLEngine.splitData(XTrim, yEncoded.slice(0, n), +U.el('ml-test-split').value / 100);
+    const XTrC = splitCls.XTrain[0].map((_, i) => splitCls.XTrain.map(r => r[i]));
+    const XTeC = splitCls.XTest[0].map((_, i) => splitCls.XTest.map(r => r[i]));
+    const XTrainClsCols = XTrC[0] ? XTrC[0].map((_, j) => XTrC.map(r => r[j])) : [];
+    const XTestClsCols = XTeC[0] ? XTeC[0].map((_, j) => XTeC.map(r => r[j])) : [];
+    trainedModels.length = 0;
+    let done = 0;
+    const bar = U.el('train-progress-bar');
+    bar.style.width = '0%'; bar.style.animation = 'none';
     const next = () => {
-        if (done >= ids.length) { bar.style.width = '100%'; U.html('train-status', `Done! ${trainedModels.length} models trained`); U.toast(`Trained ${trainedModels.length} models`, 'success'); showMLResults(); updateDashboard(); return }
-        const id = ids[done]; U.html('train-status', `Training ${id}... (${done + 1}/${ids.length})`); bar.style.width = ((done / ids.length) * 100) + '%';
+        if (done >= ids.length) {
+            bar.style.width = '100%';
+            U.html('train-status', `Done! ${trainedModels.length} models trained`);
+            U.toast(`Trained ${trainedModels.length} models`, 'success');
+            showMLResults();
+            updateDashboard();
+            return;
+        }
+        const id = ids[done];
+        U.html('train-status', `Training ${id}... (${done + 1}/${ids.length})`);
+        bar.style.width = ((done / ids.length) * 100) + '%';
         setTimeout(() => {
             try {
+                const isReg = regIds.includes(id);
+                const Xtr = isReg ? XTrainRegCols : XTrainClsCols;
+                const Xte = isReg ? XTestRegCols : XTestClsCols;
+                const yTr = isReg ? splitReg.yTrain : splitCls.yTrain;
+                const yTe = isReg ? splitReg.yTest : splitCls.yTest;
                 let r;
-                if (id === 'linear') r = MLEngine.linearRegressionModel(XTrainCols, split.yTrain, XTestCols, split.yTest);
-                else if (id === 'ridge') r = MLEngine.ridgeRegression(XTrainCols, split.yTrain, XTestCols, split.yTest, 1);
-                else if (id === 'lasso') r = MLEngine.lassoRegression(XTrainCols, split.yTrain, XTestCols, split.yTest, 1);
-                else if (id === 'poly') r = MLEngine.polynomialRegressionModel(XTrainCols, split.yTrain, XTestCols, split.yTest, 2);
-                else if (id === 'knn-reg') r = MLEngine.knnRegression(XTrainCols, split.yTrain, XTestCols, split.yTest, 5);
-                else if (id === 'dt-reg') r = MLEngine.decisionTreeRegression(XTrainCols, split.yTrain, XTestCols, split.yTest, 5);
-                else if (id === 'rf-reg') r = MLEngine.randomForestRegression(XTrainCols, split.yTrain, XTestCols, split.yTest, 10, 4);
-                else if (id === 'logistic') r = MLEngine.logisticRegression(XTrainCols, split.yTrain, XTestCols, split.yTest);
-                else if (id === 'knn-cls') r = MLEngine.knnClassifier(XTrainCols, split.yTrain, XTestCols, split.yTest, 5);
-                else if (id === 'dt-cls') r = MLEngine.decisionTreeClassifier(XTrainCols, split.yTrain, XTestCols, split.yTest, 5);
-                else if (id === 'rf-cls') r = MLEngine.randomForestClassifier(XTrainCols, split.yTrain, XTestCols, split.yTest, 10, 4);
-                if (r) { r.id = id; r.features = numCols; r.testY = split.yTest; trainedModels.push(r) }
-            } catch (e) { console.error(id, e) } done++; next()
-        }, 50)
+                const lambda = getHyperParam(id, 'lambda', 1.0);
+                const kVal = getHyperParam(id, 'k', 5);
+                const depth = getHyperParam(id, 'depth', 5);
+                const trees = getHyperParam(id, 'trees', 10);
+                const degree = getHyperParam(id, 'degree', 2);
+                const lrVal = getHyperParam(id, 'lr', 0.01);
+                const epochs = getHyperParam(id, 'epochs', 200);
+                if (id === 'linear') r = MLEngine.linearRegressionModel(Xtr, yTr, Xte, yTe);
+                else if (id === 'ridge') r = MLEngine.ridgeRegression(Xtr, yTr, Xte, yTe, lambda);
+                else if (id === 'lasso') r = MLEngine.lassoRegression(Xtr, yTr, Xte, yTe, lambda);
+                else if (id === 'poly') r = MLEngine.polynomialRegressionModel(Xtr, yTr, Xte, yTe, degree);
+                else if (id === 'knn-reg') r = MLEngine.knnRegression(Xtr, yTr, Xte, yTe, kVal);
+                else if (id === 'dt-reg') r = MLEngine.decisionTreeRegression(Xtr, yTr, Xte, yTe, depth);
+                else if (id === 'rf-reg') r = MLEngine.randomForestRegression(Xtr, yTr, Xte, yTe, trees, depth);
+                else if (id === 'logistic') r = MLEngine.logisticRegression(Xtr, yTr, Xte, yTe, lrVal, epochs);
+                else if (id === 'knn-cls') r = MLEngine.knnClassifier(Xtr, yTr, Xte, yTe, kVal);
+                else if (id === 'dt-cls') r = MLEngine.decisionTreeClassifier(Xtr, yTr, Xte, yTe, depth);
+                else if (id === 'rf-cls') r = MLEngine.randomForestClassifier(Xtr, yTr, Xte, yTe, trees, depth);
+                if (r) {
+                    r.id = id;
+                    r.features = numCols;
+                    r.testY = yTe;
+                    r.XTestCols = isReg ? XTestRegCols : XTestClsCols;
+                    // Hyperparams stored
+                    r.hyperparams = { lambda, k: kVal, depth, trees, degree, lr: lrVal, epochs };
+                    // Feature importance via permutation
+                    try { r.featureImportance = computeFeatureImportance(r, r.XTestCols, yTe); } catch (e) { r.featureImportance = []; }
+                    trainedModels.push(r);
+                }
+            } catch (e) { console.error('Training error for', id, e); }
+            done++; next();
+        }, 80);
     };
     next();
 }
+
+function buildConfusionMatrixHTML(cm, modelName) {
+    const labels = cm.labels;
+    const displayLabels = labels.map(l => dm.targetLabels?.[l] !== undefined ? dm.targetLabels[l] : `Class ${l}`);
+    let h = `<div class="result-section"><h4><i class="fas fa-th"></i> Confusion Matrix — ${modelName}</h4>`;
+    h += `<div style="overflow-x:auto"><table class="conf-matrix">`;
+    h += `<thead><tr><th></th>${displayLabels.map(l => `<th class="cm-label">Pred: ${l}</th>`).join('')}</tr></thead><tbody>`;
+    cm.matrix.forEach((row, ri) => {
+        h += `<tr><th class="cm-label">Act: ${displayLabels[ri]}</th>`;
+        const rowTotal = row.reduce((s, v) => s + v, 0);
+        row.forEach((val, ci) => {
+            const intensity = rowTotal ? val / rowTotal : 0;
+            const isCorrect = ri === ci;
+            h += `<td class="cm-cell ${isCorrect ? 'cm-correct' : 'cm-wrong'}" style="opacity:${0.3 + 0.7 * intensity}">${val}</td>`;
+        });
+        h += `</tr>`;
+    });
+    h += `</tbody></table></div></div>`;
+    return h;
+}
+
 function showMLResults() {
-    if (!trainedModels.length) { U.html('ml-results-content', '<div class="empty-state"><i class="fas fa-trophy"></i><h3>No Results</h3></div>'); return }
-    const isReg = trainedModels[0].type === 'regression';
-    let h = '<h3 style="margin-bottom:14px;font-size:15px;font-weight:600"><i class="fas fa-trophy"></i> Model Comparison</h3>';
-    if (isReg) {
-        h += `<table class="result-table"><thead><tr><th>Model</th><th>Train R²</th><th>Test R²</th><th>Train RMSE</th><th>Test RMSE</th><th>Test MAE</th></tr></thead><tbody>${trainedModels.map(m => `<tr><td><strong>${m.name}</strong></td><td class="result-value">${m.trainR2.toFixed(4)}</td><td class="result-value">${m.testR2.toFixed(4)}</td><td>${m.trainRMSE.toFixed(4)}</td><td>${m.testRMSE.toFixed(4)}</td><td>${m.testMAE.toFixed(4)}</td></tr>`).join('')}</tbody></table>`;
-    } else { h += `<table class="result-table"><thead><tr><th>Model</th><th>Train Acc</th><th>Test Acc</th><th>Precision</th><th>Recall</th><th>F1</th></tr></thead><tbody>${trainedModels.map(m => `<tr><td><strong>${m.name}</strong></td><td class="result-value">${(m.trainAccuracy * 100).toFixed(1)}%</td><td class="result-value">${(m.testAccuracy * 100).toFixed(1)}%</td><td>${(m.precision * 100).toFixed(1)}%</td><td>${(m.recall * 100).toFixed(1)}%</td><td>${m.f1.toFixed(3)}</td></tr>`).join('')}</tbody></table>` }
-    h += `<div class="result-chart" style="margin-top:18px"><canvas id="ml-comparison-chart"></canvas></div>`;
-    // Best model
-    const best = isReg ? trainedModels.reduce((a, b) => a.testR2 > b.testR2 ? a : b) : trainedModels.reduce((a, b) => a.testAccuracy > b.testAccuracy ? a : b);
-    h += `<div class="result-summary"><strong>Best Model:</strong> ${best.name}<br>${isReg ? `Test R² = ${best.testR2.toFixed(4)} · RMSE = ${best.testRMSE.toFixed(4)}` : `Test Accuracy = ${(best.testAccuracy * 100).toFixed(1)}% · F1 = ${best.f1.toFixed(3)}`}</div>`;
+    if (!trainedModels.length) {
+        U.html('ml-results-content', '<div class="empty-state"><i class="fas fa-trophy"></i><h3>No Results Yet</h3><p>Train models first</p></div>');
+        return;
+    }
+    const regModels = trainedModels.filter(m => m.type === 'regression');
+    const clsModels = trainedModels.filter(m => m.type === 'classification');
+    let h = '';
+
+    // ===== REGRESSION RESULTS =====
+    if (regModels.length) {
+        const bestReg = regModels.reduce((a, b) => a.testR2 > b.testR2 ? a : b);
+        h += `<div class="results-section-header"><i class="fas fa-chart-line"></i> Regression Results — Metrics: R², RMSE, MAE</div>`;
+        h += `<table class="result-table"><thead><tr>
+            <th>Model</th><th>Hyperparams</th><th>Train R²</th><th>Test R²</th>
+            <th>Train RMSE</th><th>Test RMSE</th><th>Test MAE</th><th>Status</th>
+        </tr></thead><tbody>`;
+        regModels.forEach(m => {
+            const isBest = m.name === bestReg.name;
+            const hpText = buildHpText(m);
+            h += `<tr class="${isBest ? 'best-model-row' : ''}">
+                <td><strong>${m.name}</strong>${isBest ? ' <span class="best-badge">🏆 Best</span>' : ''}</td>
+                <td style="font-size:10px;color:var(--text-muted)">${hpText}</td>
+                <td class="result-value">${m.trainR2.toFixed(4)}</td>
+                <td class="result-value" style="color:${m.testR2 > 0.8 ? 'var(--success)' : m.testR2 > 0.6 ? 'var(--warning)' : 'var(--danger)'}">${m.testR2.toFixed(4)}</td>
+                <td>${m.trainRMSE.toFixed(4)}</td>
+                <td>${m.testRMSE.toFixed(4)}</td>
+                <td>${m.testMAE.toFixed(4)}</td>
+                <td><span class="acc-badge" style="background:${m.testR2 > 0.8 ? 'var(--success)' : m.testR2 > 0.6 ? 'var(--warning)' : 'var(--danger)'}22;color:${m.testR2 > 0.8 ? 'var(--success)' : m.testR2 > 0.6 ? 'var(--warning)' : 'var(--danger)'}">${m.testR2 > 0.8 ? 'Excellent' : m.testR2 > 0.6 ? 'Good' : 'Poor'}</span></td>
+            </tr>`;
+        });
+        h += `</tbody></table>`;
+        h += `<div class="results-grid-2">`;
+        h += `<div class="result-chart-card"><h5><i class="fas fa-chart-bar"></i> Test R² Comparison</h5><canvas id="ml-reg-r2-chart"></canvas></div>`;
+        h += `<div class="result-chart-card"><h5><i class="fas fa-chart-bar"></i> RMSE Comparison</h5><canvas id="ml-reg-rmse-chart"></canvas></div>`;
+        h += `</div>`;
+        // Pred vs Actual for best reg model
+        h += `<div class="result-chart-card" style="margin-top:16px"><h5><i class="fas fa-equals"></i> Predicted vs Actual — ${bestReg.name} <span class="model-type-tag reg">Best Reg Model</span></h5><div class="result-chart" style="height:280px"><canvas id="ml-reg-pvsa"></canvas></div></div>`;
+        // Residual plot
+        h += `<div class="result-chart-card" style="margin-top:12px"><h5><i class="fas fa-project-diagram"></i> Residuals vs Fitted — ${bestReg.name}</h5><div class="result-chart" style="height:250px"><canvas id="ml-reg-resid"></canvas></div></div>`;
+        // Feature importance for best reg
+        if (bestReg.featureImportance && bestReg.featureImportance.length) {
+            h += `<div class="result-chart-card" style="margin-top:12px"><h5><i class="fas fa-star"></i> Feature Importance — ${bestReg.name} <span class="fi-note">(Permutation-based)</span></h5><canvas id="ml-reg-fi"></canvas></div>`;
+        }
+        h += `<div class="result-summary"><strong>🏆 Best Regression Model:</strong> ${bestReg.name} · Test R² = ${bestReg.testR2.toFixed(4)} · RMSE = ${bestReg.testRMSE.toFixed(4)}</div>`;
+    }
+
+    // ===== CLASSIFICATION RESULTS =====
+    if (clsModels.length) {
+        const bestCls = clsModels.reduce((a, b) => a.testAccuracy > b.testAccuracy ? a : b);
+        h += `<div class="results-section-header" style="margin-top:${regModels.length ? 28 : 0}px"><i class="fas fa-tags"></i> Classification Results — Metrics: Accuracy, Precision, Recall, F1</div>`;
+        h += `<table class="result-table"><thead><tr>
+            <th>Model</th><th>Hyperparams</th><th>Train Acc</th><th>Test Acc</th>
+            <th>Precision</th><th>Recall</th><th>F1 Score</th><th>Status</th>
+        </tr></thead><tbody>`;
+        clsModels.forEach(m => {
+            const isBest = m.name === bestCls.name;
+            const hpText = buildHpText(m);
+            h += `<tr class="${isBest ? 'best-model-row' : ''}">
+                <td><strong>${m.name}</strong>${isBest ? ' <span class="best-badge">🏆 Best</span>' : ''}</td>
+                <td style="font-size:10px;color:var(--text-muted)">${hpText}</td>
+                <td class="result-value">${(m.trainAccuracy * 100).toFixed(1)}%</td>
+                <td class="result-value" style="color:${m.testAccuracy >= 0.85 ? 'var(--success)' : m.testAccuracy >= 0.7 ? 'var(--warning)' : 'var(--danger)'}">${(m.testAccuracy * 100).toFixed(1)}%</td>
+                <td>${(m.precision * 100).toFixed(1)}%</td>
+                <td>${(m.recall * 100).toFixed(1)}%</td>
+                <td>${m.f1.toFixed(3)}</td>
+                <td><span class="acc-badge" style="background:${m.testAccuracy >= 0.85 ? 'var(--success)' : m.testAccuracy >= 0.7 ? 'var(--warning)' : 'var(--danger)'}22;color:${m.testAccuracy >= 0.85 ? 'var(--success)' : m.testAccuracy >= 0.7 ? 'var(--warning)' : 'var(--danger)'}">${m.testAccuracy >= 0.85 ? 'Excellent' : m.testAccuracy >= 0.7 ? 'Good' : 'Poor'}</span></td>
+            </tr>`;
+        });
+        h += `</tbody></table>`;
+        h += `<div class="results-grid-2">`;
+        h += `<div class="result-chart-card"><h5><i class="fas fa-chart-bar"></i> Test Accuracy Comparison</h5><canvas id="ml-cls-acc-chart"></canvas></div>`;
+        h += `<div class="result-chart-card"><h5><i class="fas fa-chart-bar"></i> F1 Score Comparison</h5><canvas id="ml-cls-f1-chart"></canvas></div>`;
+        h += `</div>`;
+        // Confusion matrix for best cls
+        if (bestCls.confusionMatrix) h += buildConfusionMatrixHTML(bestCls.confusionMatrix, bestCls.name);
+        // Feature importance for best cls
+        if (bestCls.featureImportance && bestCls.featureImportance.length) {
+            h += `<div class="result-chart-card" style="margin-top:12px"><h5><i class="fas fa-star"></i> Feature Importance — ${bestCls.name} <span class="fi-note">(Permutation-based accuracy drop)</span></h5><canvas id="ml-cls-fi"></canvas></div>`;
+        }
+        // Precision-Recall-F1 bar per model
+        h += `<div class="result-chart-card" style="margin-top:12px"><h5><i class="fas fa-tachometer-alt"></i> Precision · Recall · F1 — All Models</h5><div class="result-chart" style="height:240px"><canvas id="ml-cls-prf"></canvas></div></div>`;
+        h += `<div class="result-summary"><strong>🏆 Best Classification Model:</strong> ${bestCls.name} · Accuracy = ${(bestCls.testAccuracy * 100).toFixed(1)}% · F1 = ${bestCls.f1.toFixed(3)}</div>`;
+    }
+
     U.html('ml-results-content', h);
+
     // Populate predict dropdown
-    const ps = U.el('predict-model'); if (ps) { ps.innerHTML = trainedModels.map(m => `<option value="${m.id}">${m.name}</option>`).join(''); setupPredictInputs() }
-    setTimeout(() => { if (isReg) viz.bar('ml-comparison-chart', trainedModels.map(m => m.name), trainedModels.map(m => m.testR2), { title: 'Test R² Comparison', yLabel: 'R²' }); else viz.bar('ml-comparison-chart', trainedModels.map(m => m.name), trainedModels.map(m => m.testAccuracy * 100), { title: 'Test Accuracy %', yLabel: 'Accuracy %' }) }, 100);
+    const ps = U.el('predict-model');
+    if (ps) { ps.innerHTML = trainedModels.map(m => `<option value="${m.id}">${m.name} (${m.type})</option>`).join(''); setupPredictInputs(); }
+
+    setTimeout(() => {
+        // Regression charts
+        if (regModels.length) {
+            const bestReg = regModels.reduce((a, b) => a.testR2 > b.testR2 ? a : b);
+            viz.bar('ml-reg-r2-chart', regModels.map(m => m.name), regModels.map(m => +m.testR2.toFixed(4)), { title: 'Test R²', yLabel: 'R²' });
+            viz.bar('ml-reg-rmse-chart', regModels.map(m => m.name), regModels.map(m => +m.testRMSE.toFixed(4)), { title: 'Test RMSE', yLabel: 'RMSE' });
+            // Pred vs actual
+            const actuals = bestReg.testY || [];
+            const preds = bestReg.yPredTest || [];
+            if (actuals.length && preds.length && U.el('ml-reg-pvsa')) {
+                const n = Math.min(actuals.length, preds.length, 100);
+                try {
+                    new Chart(U.el('ml-reg-pvsa'), {
+                        type: 'scatter', data: {
+                            datasets: [
+                                { label: 'Pred vs Actual', data: actuals.slice(0, n).map((a, i) => ({ x: a, y: preds[i] })), backgroundColor: 'rgba(59,130,246,0.6)', pointRadius: 4 },
+                                { label: 'Perfect fit', data: [{ x: Math.min(...actuals.slice(0, n)), y: Math.min(...actuals.slice(0, n)) }, { x: Math.max(...actuals.slice(0, n)), y: Math.max(...actuals.slice(0, n)) }], type: 'line', borderColor: 'rgba(16,185,129,0.8)', borderDash: [5, 5], pointRadius: 0, fill: false }
+                            ]
+                        }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#94a3b8' } } }, scales: { x: { title: { display: true, text: 'Actual', color: '#94a3b8' }, ticks: { color: '#94a3b8' } }, y: { title: { display: true, text: 'Predicted', color: '#94a3b8' }, ticks: { color: '#94a3b8' } } } }
+                    });
+                } catch (e) { }
+            }
+            // Residuals
+            if (actuals.length && preds.length && U.el('ml-reg-resid')) {
+                const n = Math.min(actuals.length, preds.length, 100);
+                const residuals = actuals.slice(0, n).map((a, i) => a - preds[i]);
+                try { new Chart(U.el('ml-reg-resid'), { type: 'scatter', data: { datasets: [{ label: 'Residual', data: preds.slice(0, n).map((p, i) => ({ x: p, y: residuals[i] })), backgroundColor: 'rgba(139,92,246,0.6)', pointRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#94a3b8' } }, annotation: { annotations: { zeroline: { type: 'line', y: 0, borderColor: 'rgba(239,68,68,0.5)', borderWidth: 2 } } } }, scales: { x: { title: { display: true, text: 'Fitted', color: '#94a3b8' }, ticks: { color: '#94a3b8' } }, y: { title: { display: true, text: 'Residual', color: '#94a3b8' }, ticks: { color: '#94a3b8' } } } } }); } catch (e) { }
+            }
+            // Feature importance
+            if (bestReg.featureImportance && bestReg.featureImportance.length && U.el('ml-reg-fi')) {
+                const fi = bestReg.featureImportance;
+                const colors = fi.map((_, i) => `hsl(${210 + i * 30}, 80%, 60%)`);
+                try { new Chart(U.el('ml-reg-fi'), { type: 'bar', data: { labels: fi.map(f => f.feature), datasets: [{ label: 'Importance (R² drop)', data: fi.map(f => +f.importance.toFixed(4)), backgroundColor: colors, borderColor: colors, borderWidth: 1 }] }, options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } }, y: { ticks: { color: '#94a3b8' }, grid: { display: false } } } } }); } catch (e) { }
+            }
+        }
+        // Classification charts
+        if (clsModels.length) {
+            const bestCls = clsModels.reduce((a, b) => a.testAccuracy > b.testAccuracy ? a : b);
+            viz.bar('ml-cls-acc-chart', clsModels.map(m => m.name), clsModels.map(m => +(m.testAccuracy * 100).toFixed(1)), { title: 'Test Accuracy %', yLabel: 'Accuracy %' });
+            viz.bar('ml-cls-f1-chart', clsModels.map(m => m.name), clsModels.map(m => +m.f1.toFixed(3)), { title: 'F1 Score', yLabel: 'F1' });
+            // Precision-Recall-F1 grouped bar
+            if (U.el('ml-cls-prf')) {
+                try {
+                    new Chart(U.el('ml-cls-prf'), {
+                        type: 'bar', data: {
+                            labels: clsModels.map(m => m.name),
+                            datasets: [
+                                { label: 'Precision', data: clsModels.map(m => +(m.precision * 100).toFixed(1)), backgroundColor: 'rgba(59,130,246,0.7)', borderColor: '#3b82f6', borderWidth: 1 },
+                                { label: 'Recall', data: clsModels.map(m => +(m.recall * 100).toFixed(1)), backgroundColor: 'rgba(16,185,129,0.7)', borderColor: '#10b981', borderWidth: 1 },
+                                { label: 'F1 ×100', data: clsModels.map(m => +(m.f1 * 100).toFixed(1)), backgroundColor: 'rgba(139,92,246,0.7)', borderColor: '#8b5cf6', borderWidth: 1 }
+                            ]
+                        }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#94a3b8' } } }, scales: { x: { ticks: { color: '#94a3b8' } }, y: { ticks: { color: '#94a3b8' }, max: 105 } } }
+                    });
+                } catch (e) { }
+            }
+            // Feature importance
+            if (bestCls.featureImportance && bestCls.featureImportance.length && U.el('ml-cls-fi')) {
+                const fi = bestCls.featureImportance;
+                const colors = fi.map((_, i) => `hsl(${280 - i * 20}, 75%, 60%)`);
+                try { new Chart(U.el('ml-cls-fi'), { type: 'bar', data: { labels: fi.map(f => f.feature), datasets: [{ label: 'Importance (Acc drop)', data: fi.map(f => +f.importance.toFixed(4)), backgroundColor: colors, borderColor: colors, borderWidth: 1 }] }, options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } }, y: { ticks: { color: '#94a3b8' }, grid: { display: false } } } } }); } catch (e) { }
+            }
+        }
+    }, 150);
+}
+
+function buildHpText(model) {
+    const id = model.id;
+    const hp = model.hyperparams || {};
+    const paramMap = MODEL_HYPERPARAMS[id] || [];
+    if (!paramMap.length) return '—';
+    return paramMap.map(p => {
+        const val = hp[p.key] !== undefined ? hp[p.key] : p.default;
+        return `${p.label.split('(')[0].trim()}: ${val}`;
+    }).join(' · ');
 }
 
 /* ---- Predict ---- */
