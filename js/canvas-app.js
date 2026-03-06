@@ -113,6 +113,252 @@ function runPipeline() {
 function initQuickInsights() {
     U.on('btn-gen-insights', 'click', generateInsights);
 }
+
+function isTargetContinuous(target) {
+    if (!target) return true;
+    const type = dm.columnTypes[target];
+    const uniq = dm.getUniqueValues(target).length;
+    return (type === 'continuous' || type === 'discrete') && uniq > 10;
+}
+
+function generateInsights() {
+    if (!dm.hasData()) { U.toast('Load data first', 'warning'); return; }
+    const target = U.el('insights-target')?.value;
+    if (!target) { U.toast('Select a target variable', 'warning'); return; }
+    U.toast('Analyzing data...', 'info');
+
+    const container = U.el('insights-container');
+    const numCols = dm.getNumericColumns().filter(c => c !== target);
+    const catCols = dm.getCategoricalColumns();
+    const profiles = dm.profileAll();
+    const continuous = isTargetContinuous(target);
+
+    let html = '';
+
+    // --- Always: Data Overview ---
+    const overallQ = Math.round(profiles.reduce((s, p) => s + p.qualityPct, 0) / profiles.length * 100);
+    html += insightCard('fa-database', 'var(--gradient-1)', 'Data Overview', 'Summary',
+        `Dataset: <strong>${dm.data.length.toLocaleString()}</strong> rows · <strong>${dm.columns.length}</strong> columns · Data Quality: <strong>${overallQ}%</strong>.<br>Target: <strong style="color:var(--accent)">${target}</strong> — detected as <strong>${continuous ? 'Continuous (Regression)' : 'Categorical (Classification)'}</strong>`,
+        ['auto', 'Auto-generated'], 'ins-overview');
+
+    // --- Missing values ---
+    const missingCols = profiles.filter(p => p.missing > 0);
+    if (missingCols.length) {
+        html += insightCard('fa-exclamation-triangle', 'linear-gradient(135deg,#f59e0b,#ef4444)', 'Missing Values Detected', 'Data Quality',
+            `Missing in: ${missingCols.map(c => `<strong>${c.col}</strong> (${(c.missingPct * 100).toFixed(1)}%)`).join(', ')}. Use Data Cleaning → Fill Missing.`,
+            ['warning', 'Action Required'], 'ins-missing');
+    }
+
+    // --- Outliers ---
+    const outlierCols = numCols.map(c => ({ col: c, outliers: profiles.find(p => p.col === c)?.outliers || 0 })).filter(x => x.outliers > 0);
+    if (outlierCols.length) {
+        html += insightCard('fa-exclamation-circle', 'linear-gradient(135deg,#f97316,#ef4444)', 'Outliers Detected', 'Anomaly',
+            `Outliers found in: ${outlierCols.map(x => `<strong>${x.col}</strong> (${x.outliers})`).join(', ')}.`,
+            ['warning', 'Review'], 'ins-outliers');
+    }
+
+    if (continuous) {
+        // ============================================================
+        // CONTINUOUS TARGET → Correlation insights
+        // ============================================================
+        const yVals = dm.getNumericValues(target);
+        const corrResults = numCols.map(f => {
+            const xVals = dm.getNumericValues(f);
+            const n = Math.min(xVals.length, yVals.length);
+            const c = StatisticsEngine.correlation(xVals.slice(0, n), yVals.slice(0, n));
+            return {
+                feature: f, r: c.r, r2: c.rSquared, p: c.pValue, significant: c.significant,
+                strength: c.strength, direction: c.direction,
+                xVals: xVals.slice(0, n), yVals: yVals.slice(0, n)
+            };
+        }).sort((a, b) => Math.abs(b.r) - Math.abs(a.r));
+
+        const strongPos = corrResults.filter(r => r.r >= 0.3).slice(0, 3);
+        const strongNeg = corrResults.filter(r => r.r <= -0.3).slice(0, 3);
+        const topFeatures = corrResults.slice(0, 6);
+
+        // Summary insight
+        const best = corrResults[0];
+        if (best) {
+            html += insightCard('fa-bezier-curve', 'var(--gradient-5)', `Top Predictor: ${best.feature}`, 'Correlation',
+                `<strong>${best.feature}</strong> has the strongest relationship with <strong>${target}</strong>: r = <strong style="color:${best.r > 0 ? 'var(--success)' : 'var(--danger)'}">${best.r.toFixed(3)}</strong>, R² = <strong>${best.r2.toFixed(3)}</strong> — ${best.strength} ${best.direction} correlation${best.significant ? ' ✅ Significant' : ''}.`,
+                ['important', 'Key Finding'], 'ins-top-pred');
+        }
+
+        // Ranked correlation bar chart
+        html += `<div class="insight-card" id="ins-corr-bar">
+            <div class="insight-header"><div class="insight-icon" style="background:var(--gradient-2)"><i class="fas fa-chart-bar"></i></div>
+            <div><div class="insight-title">Correlation Ranking vs ${target}</div><div class="insight-subtitle">All numeric features ranked by |r|</div></div>
+            <span class="insight-tag auto">Ranked</span></div>
+            <div class="insight-chart" style="height:${Math.max(180, corrResults.length * 36)}px"><canvas id="ins-corr-bar-chart"></canvas></div>
+        </div>`;
+
+        // Strong Positive scatter plots
+        if (strongPos.length) {
+            html += `<div class="result-section"><h4 style="font-size:14px;font-weight:600;margin-bottom:12px"><i class="fas fa-arrow-trend-up" style="color:var(--success)"></i> Strong Positive Correlations with ${target}</h4>`;
+            html += `<div class="grid-3" style="gap:14px">`;
+            strongPos.forEach((r, i) => {
+                html += `<div class="card"><div class="card-header"><h3 style="font-size:12px">${r.feature} <span style="color:var(--success)">r=${r.r.toFixed(3)} · R²=${r.r2.toFixed(3)}</span></h3></div><div class="card-body"><div class="result-chart"><canvas id="ins-pos-${i}"></canvas></div></div></div>`;
+            });
+            html += `</div></div>`;
+        }
+
+        // Strong Negative scatter plots
+        if (strongNeg.length) {
+            html += `<div class="result-section"><h4 style="font-size:14px;font-weight:600;margin-bottom:12px"><i class="fas fa-arrow-trend-down" style="color:var(--danger)"></i> Strong Negative Correlations with ${target}</h4>`;
+            html += `<div class="grid-3" style="gap:14px">`;
+            strongNeg.forEach((r, i) => {
+                html += `<div class="card"><div class="card-header"><h3 style="font-size:12px">${r.feature} <span style="color:var(--danger)">r=${r.r.toFixed(3)} · R²=${r.r2.toFixed(3)}</span></h3></div><div class="card-body"><div class="result-chart"><canvas id="ins-neg-${i}"></canvas></div></div></div>`;
+            });
+            html += `</div></div>`;
+        }
+
+        if (!strongPos.length && !strongNeg.length) {
+            html += insightCard('fa-info-circle', 'var(--gradient-3)', 'Weak Correlations', 'Correlation',
+                `No strong correlations (|r| ≥ 0.3) found between numeric features and <strong>${target}</strong>. Consider feature engineering or non-linear models.`,
+                ['auto', 'Info'], 'ins-weak-corr');
+        }
+
+        // ML Readiness
+        html += insightCard('fa-robot', 'linear-gradient(135deg,#8b5cf6,#ec4899)', 'ML Recommendation', 'Machine Learning',
+            `Best features for predicting <strong>${target}</strong>: ${topFeatures.slice(0, 3).map(f => `<strong>${f.feature}</strong> (r=${f.r.toFixed(2)})`).join(', ')}. Try <strong>AutoML Studio</strong> with Regression.`,
+            ['auto', 'AutoML'], 'ins-ml');
+
+        container.innerHTML = html;
+        dm.analysisCount++;
+
+        setTimeout(() => {
+            // Ranked bar chart
+            const barEl = U.el('ins-corr-bar-chart');
+            if (barEl) {
+                new Chart(barEl, {
+                    type: 'bar',
+                    data: {
+                        labels: corrResults.map(r => r.feature), datasets: [{
+                            label: `r with ${target}`,
+                            data: corrResults.map(r => r.r),
+                            backgroundColor: corrResults.map(r => r.r > 0 ? 'rgba(16,185,129,0.7)' : 'rgba(239,68,68,0.7)'),
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { min: -1, max: 1, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                            y: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { display: false } }
+                        }
+                    }
+                });
+            }
+            // Positive scatter plots
+            strongPos.forEach((r, i) => {
+                const el = U.el(`ins-pos-${i}`);
+                if (el) viz.scatter(`ins-pos-${i}`, r.xVals, r.yVals, { xLabel: r.feature, yLabel: target, trendline: true });
+            });
+            // Negative scatter plots
+            strongNeg.forEach((r, i) => {
+                const el = U.el(`ins-neg-${i}`);
+                if (el) viz.scatter(`ins-neg-${i}`, r.xVals, r.yVals, { xLabel: r.feature, yLabel: target, trendline: true });
+            });
+        }, 200);
+
+    } else {
+        // ============================================================
+        // CATEGORICAL TARGET → Classification insights
+        // ============================================================
+        const categories = dm.getUniqueValues(target);
+        const catColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#f97316'];
+
+        // Feature discrimination score (eta-squared approximation via ANOVA)
+        const featureScores = numCols.map(f => {
+            const groups = categories.map(c => dm.data.filter(r => r[target] == c).map(r => Number(r[f])).filter(v => !isNaN(v)));
+            const allVals = groups.flat();
+            if (allVals.length < 2) return { feature: f, score: 0, groups };
+            const grandMean = ss.mean(allVals);
+            const ssBetween = groups.reduce((s, g) => s + g.length * Math.pow(ss.mean(g) - grandMean, 2), 0);
+            const ssTotal = allVals.reduce((s, v) => s + Math.pow(v - grandMean, 2), 0);
+            const eta2 = ssTotal > 0 ? ssBetween / ssTotal : 0;
+            return { feature: f, score: eta2, groups };
+        }).sort((a, b) => b.score - a.score);
+
+        // Summary insight
+        if (featureScores.length) {
+            const best = featureScores[0];
+            html += insightCard('fa-layer-group', 'var(--gradient-5)', `Top Discriminating Feature: ${best.feature}`, 'Classification',
+                `<strong>${best.feature}</strong> best separates the <strong>${categories.length}</strong> classes of <strong>${target}</strong> with η² = <strong>${best.score.toFixed(3)}</strong> (${best.score > 0.14 ? 'Large' : best.score > 0.06 ? 'Medium' : 'Small'} effect).`,
+                ['important', 'Key Finding'], 'ins-top-cls');
+        }
+
+        // Feature importance bar chart
+        html += `<div class="insight-card" id="ins-eta-bar">
+            <div class="insight-header"><div class="insight-icon" style="background:var(--gradient-2)"><i class="fas fa-chart-bar"></i></div>
+            <div><div class="insight-title">Feature Importance (η²) for ${target}</div><div class="insight-subtitle">Eta-squared — proportion of variance explained by class</div></div>
+            <span class="insight-tag auto">Classification</span></div>
+            <div class="insight-chart" style="height:${Math.max(180, featureScores.length * 36)}px"><canvas id="ins-eta-chart"></canvas></div>
+        </div>`;
+
+        // Box plots — top 4 features per category
+        const topFeats = featureScores.slice(0, 4);
+        if (topFeats.length) {
+            html += `<div class="result-section"><h4 style="font-size:14px;font-weight:600;margin-bottom:12px"><i class="fas fa-boxes" style="color:var(--accent)"></i> Top Features by ${target} Class</h4>`;
+            html += `<div class="grid-2" style="gap:14px">`;
+            topFeats.forEach((f, i) => {
+                html += `<div class="card"><div class="card-header"><h3 style="font-size:12px">${f.feature} <span style="color:var(--accent)">η²=${f.score.toFixed(3)}</span></h3></div><div class="card-body"><div class="result-chart"><canvas id="ins-cls-box-${i}"></canvas></div></div></div>`;
+            });
+            html += `</div></div>`;
+        }
+
+        // Class distribution
+        html += insightCard('fa-chart-pie', 'var(--gradient-3)', `Class Distribution: ${target}`, 'Classification',
+            `Classes: ${categories.map(c => {
+                const cnt = dm.data.filter(r => r[target] == c).length;
+                return `<strong>${c}</strong> (${cnt}, ${(cnt / dm.data.length * 100).toFixed(1)}%)`;
+            }).join(' · ')}`,
+            ['auto', 'Balance Check'], 'ins-class-dist');
+
+        // ML Readiness
+        html += insightCard('fa-robot', 'linear-gradient(135deg,#8b5cf6,#ec4899)', 'ML Recommendation', 'Machine Learning',
+            `Best features for classifying <strong>${target}</strong>: ${featureScores.slice(0, 3).map(f => `<strong>${f.feature}</strong> (η²=${f.score.toFixed(2)})`).join(', ')}. Try <strong>AutoML Studio</strong> with Classification.`,
+            ['auto', 'AutoML'], 'ins-ml');
+
+        container.innerHTML = html;
+        dm.analysisCount++;
+
+        setTimeout(() => {
+            // Eta-squared bar chart
+            const etaEl = U.el('ins-eta-chart');
+            if (etaEl) {
+                new Chart(etaEl, {
+                    type: 'bar',
+                    data: {
+                        labels: featureScores.map(f => f.feature), datasets: [{
+                            label: 'η² (Effect Size)',
+                            data: featureScores.map(f => f.score),
+                            backgroundColor: featureScores.map((_, i) => catColors[i % catColors.length] + 'bb'),
+                            borderColor: featureScores.map((_, i) => catColors[i % catColors.length]),
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { min: 0, ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                            y: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { display: false } }
+                        }
+                    }
+                });
+            }
+            // Box plots per feature
+            topFeats.forEach((f, i) => {
+                const el = U.el(`ins-cls-box-${i}`);
+                if (el) viz.boxPlot(`ins-cls-box-${i}`, f.groups, categories.map(String),
+                    { title: '', xLabel: target, yLabel: f.feature });
+            });
+        }, 200);
+    }
+}
 function generateInsights() {
     if (!dm.hasData()) { U.toast('Load data first', 'warning'); return; }
     U.toast('Analyzing data...', 'info');

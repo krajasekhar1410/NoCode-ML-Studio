@@ -74,10 +74,16 @@ const CanvasPages = {
 
     quickInsights: () => `
         <div class="notification-bar"><i class="fas fa-robot"></i>
-            <span><strong>AI-Powered Insights</strong> — Automatic pattern detection, anomaly discovery, and actionable recommendations from your data.</span>
+            <span><strong>AI-Powered Insights</strong> — Select a target column for focused pattern detection, correlation analysis, and actionable recommendations.</span>
         </div>
-        <button class="btn btn-primary btn-lg" id="btn-gen-insights" style="margin-bottom:20px"><i class="fas fa-magic"></i> Generate Insights</button>
-        <div id="insights-container"><div class="empty-state"><i class="fas fa-magic"></i><h3>Quick Insights</h3><p>Load data and click "Generate Insights" to automatically discover patterns</p></div></div>`,
+        <div style="display:flex;align-items:flex-end;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+            <div class="form-group" style="margin:0;min-width:220px">
+                <label style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.5px">Target Variable</label>
+                <select class="form-control var-dropdown" id="insights-target" style="border-color:var(--accent);margin-top:4px"><option value="">Select target column...</option></select>
+            </div>
+            <button class="btn btn-primary btn-lg" id="btn-gen-insights"><i class="fas fa-magic"></i> Generate Insights</button>
+        </div>
+        <div id="insights-container"><div class="empty-state"><i class="fas fa-magic"></i><h3>Quick Insights</h3><p>Select a target column and click Generate Insights</p></div></div>`,
 
     automl: () => `
         <div class="wizard" id="automl-wizard">
