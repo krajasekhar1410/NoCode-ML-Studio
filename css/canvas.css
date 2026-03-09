@@ -401,6 +401,7 @@
     content: '';
     position: absolute;
     inset: 0;
+    pointer-events: none;
     background: radial-gradient(circle at top right, rgba(59, 130, 246, .12), transparent 60%)
 }
 
