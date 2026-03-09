@@ -37,7 +37,10 @@ function initPipeline() {
     if (!canvas) return;
     const palette = U.el('node-palette');
     palette.querySelectorAll('.palette-item').forEach(item => {
-        item.addEventListener('click', () => addPipelineNode(item.dataset.node, item.textContent.trim(), canvas));
+        item.addEventListener('click', () => {
+            addPipelineNode(item.dataset.node, item.textContent.trim(), canvas);
+            if (window.updateVarDropdowns) window.updateVarDropdowns();
+        });
     });
     U.on('btn-run-pipeline', 'click', runPipeline);
     U.on('btn-clear-pipeline', 'click', () => {
@@ -63,10 +66,22 @@ function addPipelineNode(type, label, canvas) {
     node.dataset.type = type;
     let bodyHtml = '';
     if (type === 'csv') bodyHtml = '<span>Source dataset</span>';
-    else if (type === 'clean') bodyHtml = '<select class="form-control" style="font-size:10px"><option>Fill Missing</option><option>Drop Duplicates</option><option>Remove Outliers</option></select>';
-    else if (type === 'feature') bodyHtml = '<select class="form-control" style="font-size:10px"><option>Auto Features</option><option>Polynomial</option><option>Interaction</option></select>';
-    else if (type === 'model') bodyHtml = '<select class="form-control" style="font-size:10px"><option>AutoML</option><option>Linear</option><option>Random Forest</option><option>KNN</option></select>';
-    else if (type === 'filter') bodyHtml = '<input class="form-control" placeholder="Condition..." style="font-size:10px">';
+    else if (type === 'clean') bodyHtml = `
+        <select class="form-control node-method" style="font-size:10px;margin-bottom:4px"><option>Fill Missing</option><option>Drop Duplicates</option><option>Remove Outliers</option></select>
+        <select class="form-control node-column var-dropdown" style="font-size:10px"><option value="all">All Cols</option></select>`;
+    else if (type === 'transform') bodyHtml = `
+        <select class="form-control node-method" style="font-size:10px;margin-bottom:4px"><option>Standardize</option><option>Normalize</option><option>Log Scale</option></select>
+        <select class="form-control node-column var-dropdown" style="font-size:10px"><option value="all">All Numeric</option></select>`;
+    else if (type === 'feature') bodyHtml = `
+        <select class="form-control node-method" style="font-size:10px;margin-bottom:4px"><option>Auto Features</option><option>Polynomial</option><option>Interaction</option></select>
+        <select class="form-control node-column var-dropdown" style="font-size:10px"><option value="all">All Numeric</option></select>`;
+    else if (type === 'split') bodyHtml = `
+        <div style="font-size:9px;margin-bottom:4px">Test Ratio</div>
+        <input type="range" class="node-method" min="0.1" max="0.5" step="0.05" value="0.2" style="width:100%">`;
+    else if (type === 'model') bodyHtml = `
+        <select class="form-control node-method" style="font-size:10px;margin-bottom:4px"><option>AutoML</option><option>Linear</option><option>Random Forest</option><option>KNN</option></select>
+        <select class="form-control aml-target-inline var-dropdown" style="font-size:10px"><option value="">Select Target</option></select>`;
+    else if (type === 'filter') bodyHtml = '<input class="form-control node-method" placeholder="x > 50" style="font-size:10px">';
     else if (type === 'evaluate') bodyHtml = '<span>R², RMSE, F1...</span>';
     else if (type === 'deploy') bodyHtml = '<span>Export model</span>';
     else bodyHtml = `<span>${label}</span>`;
@@ -102,17 +117,53 @@ function runPipeline() {
 
         setTimeout(() => {
             const type = node.dataset.type;
+            const method = node.querySelector('.node-method')?.value;
+            const col = node.querySelector('.node-column')?.value;
             try {
-                if (type === 'clean') { dm.removeDuplicates(); }
-                else if (type === 'feature') { /* auto feature — no-op for demo */ }
-                else if (type === 'model') { /* triggers automl on completion */ }
-            } catch (e) { /* continue */ }
+                if (type === 'clean') {
+                    const targetCols = (!col || col === 'all') ? dm.getNumericColumns() : [col];
+                    if (method === 'Drop Duplicates') dm.removeDuplicates();
+                    else if (method === 'Fill Missing') targetCols.forEach(c => dm.fillMissing(c, 'mean'));
+                    else if (method === 'Remove Outliers') targetCols.forEach(c => dm.removeOutliers(c, 'iqr'));
+                }
+                else if (type === 'transform') {
+                    const targetCols = (!col || col === 'all') ? dm.getNumericColumns() : [col];
+                    if (method === 'Standardize') targetCols.forEach(c => dm.standardize(c));
+                    else if (method === 'Normalize') targetCols.forEach(c => dm.normalize(c));
+                    else if (method === 'Log Scale') targetCols.forEach(c => dm.logScale(c));
+                }
+                else if (type === 'feature') {
+                    const targetCols = (!col || col === 'all') ? dm.getNumericColumns().slice(0, 5) : [col];
+                    if (method === 'Polynomial') targetCols.forEach(c => dm.addCalculatedColumn(`${c}^2`, `${c}*${c}`));
+                    else if (method === 'Interaction') {
+                        if (targetCols.length >= 2) dm.addCalculatedColumn(`${targetCols[0]}*${targetCols[1]}`, `${targetCols[0]}*${targetCols[1]}`);
+                    }
+                }
+                else if (type === 'model') {
+                    const target = node.querySelector('.aml-target-inline')?.value;
+                    if (target) {
+                        dm.target = target;
+                        const amlTargetEl = U.el('aml-target');
+                        if (amlTargetEl) amlTargetEl.value = target;
+                        U.toast(`Starting AutoML for ${target}...`, 'info');
+                        navigateTo('automl');
+                        setTimeout(() => runAutoML(), 1000);
+                        return; // Stop pipeline here, AutoML takes over
+                    }
+                }
+                else if (type === 'evaluate') {
+                    navigateTo('ml-results');
+                }
+            } catch (e) {
+                console.error("Pipeline Step Error:", e);
+                U.toast(`Error in ${type}: ${e.message}`, 'error');
+            }
             ns.className = 'node-status done';
             node.classList.remove('active');
             node.classList.add('completed');
             i++;
             runNext();
-        }, 600);
+        }, 800);
     };
     runNext();
 }

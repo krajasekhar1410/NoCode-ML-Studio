@@ -112,8 +112,30 @@ class DataManager {
     removeOutliers(col, method = 'iqr') {
         this.snapshot();
         const vals = this.getNumericValues(col);
+        if (vals.length === 0) return;
         if (method === 'iqr') { const q1 = ss.quantile(vals, 0.25), q3 = ss.quantile(vals, 0.75), iqr = q3 - q1; this.data = this.data.filter(r => { const v = Number(r[col]); return !isNaN(v) && v >= q1 - 1.5 * iqr && v <= q3 + 1.5 * iqr; }); }
-        else if (method === 'zscore') { const m = ss.mean(vals), s = ss.standardDeviation(vals); this.data = this.data.filter(r => { const v = Number(r[col]); return !isNaN(v) && Math.abs((v - m) / s) <= 3; }); }
+        else if (method === 'zscore') { const m = ss.mean(vals), s = ss.standardDeviation(vals); if (s === 0) return; this.data = this.data.filter(r => { const v = Number(r[col]); return !isNaN(v) && Math.abs((v - m) / s) <= 3; }); }
+    }
+    // Transforms
+    normalize(col) {
+        this.snapshot();
+        const vals = this.getNumericValues(col);
+        if (vals.length < 2) return;
+        const min = Math.min(...vals), max = Math.max(...vals);
+        if (max === min) return;
+        this.data.forEach(r => { if (r[col] != null) r[col] = (Number(r[col]) - min) / (max - min); });
+    }
+    standardize(col) {
+        this.snapshot();
+        const vals = this.getNumericValues(col);
+        if (vals.length < 2) return;
+        const m = ss.mean(vals), s = ss.standardDeviation(vals);
+        if (s === 0) return;
+        this.data.forEach(r => { if (r[col] != null) r[col] = (Number(r[col]) - m) / s; });
+    }
+    logScale(col) {
+        this.snapshot();
+        this.data.forEach(r => { const v = Number(r[col]); if (!isNaN(v) && v > 0) r[col] = Math.log10(v); });
     }
     convertType(col, toType) {
         this.snapshot();
