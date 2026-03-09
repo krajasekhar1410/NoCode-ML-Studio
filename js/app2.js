@@ -639,8 +639,8 @@ function showMLResults() {
         });
         h += `</tbody></table>`;
         h += `<div class="results-grid-2">`;
-        h += `<div class="result-chart-card"><h5><i class="fas fa-chart-bar"></i> Test R² Comparison</h5><canvas id="ml-reg-r2-chart"></canvas></div>`;
-        h += `<div class="result-chart-card"><h5><i class="fas fa-chart-bar"></i> RMSE Comparison</h5><canvas id="ml-reg-rmse-chart"></canvas></div>`;
+        h += `<div class="result-chart-card"><h5><i class="fas fa-chart-bar"></i> Test R² Comparison</h5><div style="height:240px;position:relative"><canvas id="ml-reg-r2-chart"></canvas></div></div>`;
+        h += `<div class="result-chart-card"><h5><i class="fas fa-chart-bar"></i> RMSE Comparison</h5><div style="height:240px;position:relative"><canvas id="ml-reg-rmse-chart"></canvas></div></div>`;
         h += `</div>`;
         // Pred vs Actual for best reg model
         h += `<div class="result-chart-card" style="margin-top:16px"><h5><i class="fas fa-equals"></i> Predicted vs Actual — ${bestReg.name} <span class="model-type-tag reg">Best Reg Model</span></h5><div class="result-chart" style="height:280px"><canvas id="ml-reg-pvsa"></canvas></div></div>`;
@@ -677,8 +677,8 @@ function showMLResults() {
         });
         h += `</tbody></table>`;
         h += `<div class="results-grid-2">`;
-        h += `<div class="result-chart-card"><h5><i class="fas fa-chart-bar"></i> Test Accuracy Comparison</h5><canvas id="ml-cls-acc-chart"></canvas></div>`;
-        h += `<div class="result-chart-card"><h5><i class="fas fa-chart-bar"></i> F1 Score Comparison</h5><canvas id="ml-cls-f1-chart"></canvas></div>`;
+        h += `<div class="result-chart-card"><h5><i class="fas fa-chart-bar"></i> Test Accuracy Comparison</h5><div style="height:240px;position:relative"><canvas id="ml-cls-acc-chart"></canvas></div></div>`;
+        h += `<div class="result-chart-card"><h5><i class="fas fa-chart-bar"></i> F1 Score Comparison</h5><div style="height:240px;position:relative"><canvas id="ml-cls-f1-chart"></canvas></div></div>`;
         h += `</div>`;
         // Confusion matrix for best cls
         if (bestCls.confusionMatrix) h += buildConfusionMatrixHTML(bestCls.confusionMatrix, bestCls.name);
