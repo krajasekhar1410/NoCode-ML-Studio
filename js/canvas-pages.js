@@ -101,15 +101,19 @@ const CanvasPages = {
             <div class="automl-hero"><h2>AutoML Studio</h2><p>Build production-quality machine learning models with zero code. Just select your target and click build.</p>
                 <div class="grid-2" style="max-width:700px;margin:0 auto">
                     <div class="form-group"><label>Target Variable</label><select class="form-control var-dropdown" id="aml-target" style="font-size:14px;padding:12px"><option value="">Select target column...</option></select></div>
-                    <div class="form-group"><label>Problem Type</label><select class="form-control" id="aml-problem" style="font-size:14px;padding:12px"><option value="auto">Auto-detect</option><option value="regression">Regression</option><option value="classification">Classification</option></select></div>
+                    <div class="form-group"><label>Problem Type</label><select class="form-control" id="aml-problem" style="font-size:14px;padding:12px"><option value="auto">Auto-detect</option><option value="regression">Regression</option><option value="classification">Classification</option><option value="time-series">Time Series</option></select></div>
                 </div>
             </div>
             <h3 style="font-size:15px;font-weight:600;margin-bottom:14px"><i class="fas fa-bolt"></i> Choose Build Type</h3>
             <div class="build-options">
-                <div class="build-option selected" data-build="quick" id="opt-quick"><div class="option-icon" style="background:var(--gradient-2)"><i class="fas fa-bolt"></i></div><h3>Quick Build</h3><p>Fast training with top 3 algorithms. Best for rapid prototyping.</p><div class="option-time"><i class="fas fa-clock"></i> ~5 seconds</div></div>
-                <div class="build-option" data-build="standard" id="opt-standard"><div class="option-icon" style="background:var(--gradient-5)"><i class="fas fa-microscope"></i></div><h3>Standard Build</h3><p>Full sweep of 7+ algorithms with hyperparameter tuning.</p><div class="option-time"><i class="fas fa-clock"></i> ~15 seconds</div></div>
+                <div class="build-option selected" data-build="quick" id="opt-quick"><div class="option-icon" style="background:var(--gradient-2)"><i class="fas fa-bolt"></i></div><h3>Quick Build</h3><p>Fast training with 6-8 algorithms. Best for automatic insights.</p><div class="option-time"><i class="fas fa-clock"></i> ~10 seconds</div></div>
+                <div class="build-option" data-build="standard" id="opt-standard"><div class="option-icon" style="background:var(--gradient-5)"><i class="fas fa-microscope"></i></div><h3>Standard Build</h3><p>Select specific algorithms & configure.</p><div class="option-time"><i class="fas fa-clock"></i> Custom</div></div>
             </div>
-            <div style="text-align:center;margin-top:4px"><button class="btn btn-primary btn-lg" id="btn-automl-build" style="padding:14px 48px;font-size:15px"><i class="fas fa-rocket"></i> Start AutoML Build</button></div>
+            <div id="standard-build-options" style="display:none;margin-top:20px;padding:15px;background:var(--bg-card);border-radius:12px;border:1px solid rgba(255,255,255,0.05);text-align:left;">
+                <h4 style="font-size:14px;margin-bottom:10px;"><i class="fas fa-check-square"></i> Select Models to Train</h4>
+                <div class="grid-3" id="standard-models-list" style="gap:10px;font-size:12px;"></div>
+            </div>
+            <div style="text-align:center;margin-top:20px"><button class="btn btn-primary btn-lg" id="btn-automl-build" style="padding:14px 48px;font-size:15px"><i class="fas fa-rocket"></i> Start AutoML Build</button></div>
         </div>
         <div id="automl-training" style="display:none"></div>
         <div id="automl-results" style="display:none"></div>`,

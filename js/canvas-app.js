@@ -377,25 +377,78 @@ function insightCard(icon, gradient, title, subtitle, body, [tagClass, tagText],
 }
 
 /* ---- AutoML Studio ---- */
+function updateAutoMLOptions() {
+    const buildType = document.querySelector('.build-option.selected')?.dataset.build || 'quick';
+    const stdOpts = U.el('standard-build-options');
+    if (!stdOpts) return;
+
+    if (buildType === 'standard') {
+        stdOpts.style.display = 'block';
+        const target = U.el('aml-target')?.value;
+        let pType = U.el('aml-problem')?.value || 'auto';
+        if (pType === 'auto' && target) {
+            pType = Object.keys(dm.columnTypes).length ? (dm.columnTypes[target] === 'categorical' || dm.getUniqueValues(target).length <= 10 ? 'classification' : 'regression') : 'regression';
+        }
+
+        const modelsList = U.el('standard-models-list');
+        if (!modelsList) return;
+
+        let html = '';
+        if (pType === 'regression') {
+            html = `<label><input type="checkbox" value="linear" checked> Linear Regression</label>
+                    <label><input type="checkbox" value="ridge" checked> Ridge Regression</label>
+                    <label><input type="checkbox" value="lasso" checked> Lasso Regression</label>
+                    <label><input type="checkbox" value="poly" checked> Polynomial (2nd deg)</label>
+                    <label><input type="checkbox" value="knn-reg" checked> KNN Regression</label>
+                    <label><input type="checkbox" value="dt-reg" checked> Decision Tree</label>
+                    <label><input type="checkbox" value="rf-reg" checked> Random Forest</label>`;
+        } else if (pType === 'classification') {
+            html = `<label><input type="checkbox" value="logistic" checked> Logistic Regression</label>
+                    <label><input type="checkbox" value="knn-cls" checked> KNN Classifier</label>
+                    <label><input type="checkbox" value="dt-cls" checked> Decision Tree Classifier</label>
+                    <label><input type="checkbox" value="rf-cls" checked> Random Forest Classifier</label>
+                    <label><input type="checkbox" value="nb-cls" checked> Naive Bayes</label>
+                    <label><input type="checkbox" value="svm-cls" checked> Linear SVM</label>`;
+        } else if (pType === 'time-series') {
+            html = `<label><input type="checkbox" value="lstm" checked> LSTM Forecast</label>
+                    <label><input type="checkbox" value="arima" checked> ARIMA</label>
+                    <label><input type="checkbox" value="ets" checked> ETS Smoothing</label>
+                    <label><input type="checkbox" value="prophet" checked> Prophet</label>
+                    <label><input type="checkbox" value="hw" checked> Holt-Winters</label>
+                    <label><input type="checkbox" value="tbats" checked> TBATS</label>`;
+        }
+        modelsList.innerHTML = html;
+    } else {
+        stdOpts.style.display = 'none';
+    }
+}
+
 function initAutoML() {
-    // Use event delegation on document so it works regardless of render timing
     document.addEventListener('click', function (e) {
         const opt = e.target.closest('.build-option');
         if (opt && document.getElementById('page-automl')?.contains(opt)) {
             document.querySelectorAll('.build-option').forEach(o => o.classList.remove('selected'));
             opt.classList.add('selected');
+            updateAutoMLOptions();
         }
         if (e.target.id === 'btn-automl-build' || e.target.closest('#btn-automl-build')) {
             runAutoML();
         }
     }, { once: false });
-    // Also directly bind in case page is already rendered
     const btn = U.el('btn-automl-build');
     if (btn) btn.addEventListener('click', runAutoML);
+
+    document.addEventListener('change', function (e) {
+        if (e.target.id === 'aml-target' || e.target.id === 'aml-problem') {
+            updateAutoMLOptions();
+        }
+    });
+
     document.querySelectorAll('.build-option').forEach(opt => {
         opt.addEventListener('click', () => {
             document.querySelectorAll('.build-option').forEach(o => o.classList.remove('selected'));
             opt.classList.add('selected');
+            updateAutoMLOptions();
         });
     });
 }
@@ -424,9 +477,16 @@ function runAutoML() {
     const c3 = U.el('aml-conn-3'); if (c3) c3.classList.add('active');
 
     // Show training progress
-    const models = pType === 'regression'
-        ? (buildType === 'quick' ? ['linear', 'rf-reg', 'knn-reg'] : ['linear', 'ridge', 'lasso', 'poly', 'knn-reg', 'dt-reg', 'rf-reg'])
-        : (buildType === 'quick' ? ['logistic', 'rf-cls', 'knn-cls'] : ['logistic', 'knn-cls', 'dt-cls', 'rf-cls']);
+    let models = [];
+    if (buildType === 'standard') {
+        const checkboxes = document.querySelectorAll('#standard-models-list input:checked');
+        models = Array.from(checkboxes).map(c => c.value);
+        if (!models.length) { U.toast('Please select at least one model', 'warning'); return; }
+    } else {
+        if (pType === 'regression') models = ['linear', 'ridge', 'lasso', 'poly', 'knn-reg', 'dt-reg', 'rf-reg'];
+        else if (pType === 'classification') models = ['logistic', 'knn-cls', 'dt-cls', 'rf-cls', 'nb-cls', 'svm-cls'];
+        else if (pType === 'time-series') models = ['lstm', 'arima', 'ets', 'prophet', 'hw', 'tbats'];
+    }
 
     const trainingDiv = U.el('automl-training');
     if (!trainingDiv) { U.toast('AutoML page not ready. Please navigate to AutoML Studio first.', 'error'); return; }
@@ -440,14 +500,13 @@ function runAutoML() {
     // Prepare data
     const X = dm.features.map(f => dm.getNumericValues(f));
     let y = dm.getColumnValues(target);
+    const tsValues = dm.getNumericValues(target);
     if (pType === 'classification') { const labels = [...new Set(y)]; y = y.map(v => labels.indexOf(v)); dm.targetLabels = labels; } else y = y.map(Number);
-    const n = Math.min(y.length, ...X.map(c => c.length));
+    const n = Math.min(y.length, ...X.map(c => c.length) || [y.length]);
     const XTrim = X.map(c => c.slice(0, n)), yTrim = y.slice(0, n);
-    const split = MLEngine.splitData(XTrim, yTrim, 0.2);
-    const XTr = split.XTrain[0].map((_, i) => split.XTrain.map(r => r[i]));
-    const XTe = split.XTest[0].map((_, i) => split.XTest.map(r => r[i]));
-    const XTrainCols = XTr[0] ? XTr[0].map((_, j) => XTr.map(r => r[j])) : [];
-    const XTestCols = XTe[0] ? XTe[0].map((_, j) => XTe.map(r => r[j])) : [];
+    const split = pType === 'time-series' ? { yTrain: tsValues } : MLEngine.splitData(XTrim, yTrim, 0.2);
+    const XTrainCols = pType !== 'time-series' ? (split.XTrain[0] ? split.XTrain[0].map((_, j) => split.XTrain.map(r => r[j])) : []) : [];
+    const XTestCols = pType !== 'time-series' ? (split.XTest[0] ? split.XTest[0].map((_, j) => split.XTest.map(r => r[j])) : []) : [];
 
     trainedModels.length = 0;
     let done = 0;
@@ -487,7 +546,21 @@ function runAutoML() {
                 else if (id === 'knn-cls') r = MLEngine.knnClassifier(XTrainCols, split.yTrain, XTestCols, split.yTest, 5);
                 else if (id === 'dt-cls') r = MLEngine.decisionTreeClassifier(XTrainCols, split.yTrain, XTestCols, split.yTest, 5);
                 else if (id === 'rf-cls') r = MLEngine.randomForestClassifier(XTrainCols, split.yTrain, XTestCols, split.yTest, 10, 4);
-                if (r) { r.id = id; r.features = dm.features.filter(f => ['continuous', 'discrete'].includes(dm.columnTypes[f])); r.testY = split.yTest; trainedModels.push(r); }
+                else if (id === 'nb-cls') r = MLEngine.naiveBayesClassifier(XTrainCols, split.yTrain, XTestCols, split.yTest);
+                else if (id === 'svm-cls') r = MLEngine.svmClassifier(XTrainCols, split.yTrain, XTestCols, split.yTest);
+                else if (id === 'lstm') r = MLEngine.lstmForecast(tsValues);
+                else if (id === 'arima') r = MLEngine.arimaForecast(tsValues);
+                else if (id === 'ets') r = MLEngine.etsForecast(tsValues);
+                else if (id === 'prophet') r = MLEngine.prophetForecast(tsValues);
+                else if (id === 'hw') r = MLEngine.hwForecast(tsValues);
+                else if (id === 'tbats') r = MLEngine.tbatsForecast(tsValues);
+
+                if (r) {
+                    r.id = id;
+                    r.features = pType !== 'time-series' ? dm.features.filter(f => ['continuous', 'discrete'].includes(dm.columnTypes[f])) : [];
+                    r.testY = split.yTest;
+                    trainedModels.push(r);
+                }
             } catch (e) { console.error(id, e); }
             if (stepEl) { stepEl.classList.remove('active'); stepEl.classList.add('done'); stepEl.innerHTML = `<i class="fas fa-check"></i> ${id}`; }
             done++; next();
@@ -501,22 +574,55 @@ function showAutoMLResults(pType) {
     if (!resultsDiv) return;
     resultsDiv.style.display = '';
     const isReg = pType === 'regression';
-    const sorted = isReg
-        ? [...trainedModels].sort((a, b) => b.testR2 - a.testR2)
-        : [...trainedModels].sort((a, b) => b.testAccuracy - a.testAccuracy);
+    const isTS = pType === 'time-series';
+
+    let sorted = [...trainedModels];
+    if (isTS) {
+        sorted.forEach(m => {
+            if (m.fitted && !m.testMetric) {
+                const yTrue = dm.getNumericValues(dm.target);
+                const n = Math.min(yTrue.length, m.fitted.length);
+                let sumSq = 0, count = 0;
+                for (let i = 0; i < n; i++) {
+                    if (!isNaN(m.fitted[i]) && !isNaN(yTrue[i])) { sumSq += (yTrue[i] - m.fitted[i]) ** 2; count++; }
+                }
+                m.testMetric = count > 0 ? Math.sqrt(sumSq / count) : 999;
+            } else if (!m.testMetric) m.testMetric = 999;
+        });
+        sorted.sort((a, b) => a.testMetric - b.testMetric);
+    } else if (isReg) {
+        sorted.sort((a, b) => b.testR2 - a.testR2);
+    } else {
+        sorted.sort((a, b) => b.testAccuracy - a.testAccuracy);
+    }
 
     const best = sorted[0];
     const modelColors = ['var(--gradient-1)', 'var(--gradient-2)', 'var(--gradient-3)', 'var(--gradient-4)', 'var(--gradient-5)', 'linear-gradient(135deg,#ec4899,#f97316)', 'linear-gradient(135deg,#06b6d4,#10b981)'];
 
     let html = `<h3 style="font-size:18px;font-weight:700;margin:22px 0 14px"><i class="fas fa-trophy" style="color:var(--warning)"></i> Model Leaderboard</h3>`;
     html += `<div class="leaderboard"><div class="leaderboard-header"><h3><i class="fas fa-crown" style="color:var(--warning)"></i> Best: ${best.name}</h3><span class="status-pill success"><i class="fas fa-circle"></i> ${sorted.length} models</span></div>`;
-    html += `<div class="leaderboard-row header"><div>Rank</div><div>Model</div><div>${isReg ? 'Test R²' : 'Test Acc'}</div><div>${isReg ? 'RMSE' : 'F1'}</div><div>Performance</div><div>Status</div></div>`;
+
+    if (isTS) {
+        html += `<div class="leaderboard-row header"><div>Rank</div><div>Model</div><div>RMSE (Fit)</div><div>Horizon</div><div>Performance</div><div>Status</div></div>`;
+    } else {
+        html += `<div class="leaderboard-row header"><div>Rank</div><div>Model</div><div>${isReg ? 'Test R²' : 'Test Acc'}</div><div>${isReg ? 'RMSE' : 'F1'}</div><div>Performance</div><div>Status</div></div>`;
+    }
+
     sorted.forEach((m, i) => {
         const rankClass = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
-        const metric = isReg ? m.testR2 : m.testAccuracy;
-        const metric2 = isReg ? m.testRMSE.toFixed(4) : m.f1.toFixed(3);
-        const barPct = isReg ? Math.max(0, metric * 100) : metric * 100;
-        html += `<div class="leaderboard-row"><div class="leaderboard-rank ${rankClass}">#${i + 1}</div><div class="leaderboard-model"><div class="leaderboard-model-icon" style="background:${modelColors[i % modelColors.length]}"><i class="fas fa-brain"></i></div>${m.name}</div><div class="leaderboard-metric">${(metric * (isReg ? 1 : 100)).toFixed(isReg ? 4 : 1)}${isReg ? '' : '%'}</div><div class="leaderboard-metric">${metric2}</div><div><div class="leaderboard-bar"><div class="leaderboard-bar-fill" style="width:${Math.max(0, barPct)}%"></div></div></div><div><span class="status-pill success"><i class="fas fa-check"></i> Done</span></div></div>`;
+        let metricTxt = '', metric2Txt = '', barPct = 0;
+        if (isTS) {
+            metricTxt = m.testMetric.toFixed(4);
+            metric2Txt = (m.forecast ? m.forecast.length : 0) + ' steps';
+            barPct = Math.max(0, 100 - (m.testMetric / ss.mean(dm.getNumericValues(dm.target))) * 100);
+        } else {
+            const metric = isReg ? m.testR2 : m.testAccuracy;
+            metricTxt = (metric * (isReg ? 1 : 100)).toFixed(isReg ? 4 : 1) + (isReg ? '' : '%');
+            metric2Txt = isReg ? m.testRMSE.toFixed(4) : (m.f1 || 0).toFixed(3);
+            barPct = isReg ? Math.max(0, metric * 100) : metric * 100;
+        }
+
+        html += `<div class="leaderboard-row"><div class="leaderboard-rank ${rankClass}">#${i + 1}</div><div class="leaderboard-model"><div class="leaderboard-model-icon" style="background:${modelColors[i % modelColors.length]}"><i class="fas fa-brain"></i></div>${m.name}</div><div class="leaderboard-metric">${metricTxt}</div><div class="leaderboard-metric">${metric2Txt}</div><div><div class="leaderboard-bar"><div class="leaderboard-bar-fill" style="width:${Math.max(0, barPct)}%"></div></div></div><div><span class="status-pill success"><i class="fas fa-check"></i> Done</span></div></div>`;
     });
     html += '</div>';
 
@@ -527,19 +633,23 @@ function showAutoMLResults(pType) {
 
     // Comparison chart
     html += `<div class="grid-2" style="margin-top:18px">
-        <div class="card"><div class="card-header"><h3>${isReg ? 'R² Comparison' : 'Accuracy Comparison'}</h3></div><div class="card-body"><canvas id="automl-comp-chart" style="height:280px"></canvas></div></div>
-        <div class="card"><div class="card-header"><h3>Predicted vs Actual</h3></div><div class="card-body"><canvas id="automl-pred-chart" style="height:280px"></canvas></div></div>
+        <div class="card"><div class="card-header"><h3>${isTS ? 'RMSE Comparison' : (isReg ? 'R² Comparison' : 'Accuracy Comparison')}</h3></div><div class="card-body"><canvas id="automl-comp-chart" style="height:280px"></canvas></div></div>
+        <div class="card"><div class="card-header"><h3>${isTS ? 'Forecast vs Actual' : 'Predicted vs Actual'}</h3></div><div class="card-body"><canvas id="automl-pred-chart" style="height:280px"></canvas></div></div>
     </div>`;
 
     resultsDiv.innerHTML = html;
 
     setTimeout(() => {
         // Comparison
-        if (isReg) viz.bar('automl-comp-chart', sorted.map(m => m.name), sorted.map(m => m.testR2), { title: 'Test R²', yLabel: 'R²', palette: 'sunset' });
+        if (isTS) viz.bar('automl-comp-chart', sorted.map(m => m.name), sorted.map(m => m.testMetric), { title: 'RMSE', yLabel: 'RMSE', palette: 'sunset' });
+        else if (isReg) viz.bar('automl-comp-chart', sorted.map(m => m.name), sorted.map(m => m.testR2), { title: 'Test R²', yLabel: 'R²', palette: 'sunset' });
         else viz.bar('automl-comp-chart', sorted.map(m => m.name), sorted.map(m => m.testAccuracy * 100), { title: 'Accuracy %', yLabel: '%', palette: 'sunset' });
 
         // Pred vs Actual
-        if (best.yPredTest && best.testY) {
+        if (isTS) {
+            const yTrue = dm.getNumericValues(dm.target);
+            viz.line('automl-pred-chart', [yTrue, best.fitted], ["Actual", "Fitted"], { title: best.name, xLabel: 'Time', yLabel: dm.target });
+        } else if (best.yPredTest && best.testY) {
             viz.scatter('automl-pred-chart', best.testY || [], best.yPredTest, { xLabel: 'Actual', yLabel: 'Predicted', title: best.name, trendline: true });
         }
 

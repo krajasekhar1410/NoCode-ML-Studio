@@ -39,6 +39,9 @@ function navigateTo(page) {
     U.el('page-title').textContent = PAGE_TITLES[page] || page;
     U.el('breadcrumb').innerHTML = `<span>Home</span><i class="fas fa-chevron-right"></i><span>${PAGE_TITLES[page] || page}</span>`;
     if (page === 'data-profiler' && dm.hasData()) profiler.renderProfileReport('profiler-content');
+
+    // Globally update dropdowns so navigating back and forth updates Canvas UI properly
+    if (typeof updateVarDropdowns === 'function') updateVarDropdowns();
 }
 window.navigateTo = navigateTo; window.showToast = U.toast;
 
