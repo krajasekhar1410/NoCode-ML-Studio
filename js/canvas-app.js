@@ -438,21 +438,26 @@ function initAutoML() {
     const btn = U.el('btn-automl-build');
     if (btn) btn.addEventListener('click', runAutoML);
 
-    document.addEventListener('focusin', function (e) {
-        if (e.target.id === 'aml-target' && dm && dm.hasData()) {
-            if (e.target.options.length <= 1) {
-                const old = e.target.value;
-                e.target.innerHTML = '<option value="">Select target column...</option>';
-                dm.columns.forEach(c => {
+    const forcePopulateDropdown = (e) => {
+        const sel = e.target;
+        if (sel && sel.id === 'aml-target' && window.dm && window.dm.columns && window.dm.columns.length > 0) {
+            if (sel.options.length <= 1) {
+                const old = sel.value;
+                sel.innerHTML = '<option value="">Select target column...</option>';
+                window.dm.columns.forEach(c => {
                     const o = document.createElement('option');
                     o.value = c;
-                    o.textContent = `${c} (${dm.columnTypes[c]})`;
-                    e.target.appendChild(o);
+                    o.textContent = `${c} (${window.dm.columnTypes[c] || 'unknown'})`;
+                    sel.appendChild(o);
                 });
-                if (old) e.target.value = old;
+                if (old) sel.value = old;
+                console.log("Force populated aml-target with columns:", window.dm.columns);
             }
         }
-    });
+    };
+
+    document.addEventListener('mousedown', forcePopulateDropdown, true);
+    document.addEventListener('mouseover', forcePopulateDropdown, true);
 
     document.addEventListener('change', function (e) {
         if (e.target.id === 'aml-target' || e.target.id === 'aml-problem') {
